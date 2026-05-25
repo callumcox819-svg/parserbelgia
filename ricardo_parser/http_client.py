@@ -167,13 +167,21 @@ def article_page_url(article_id: str) -> str:
 
 
 def proxy_label(proxy: str | None) -> str:
+    """Короткая метка для логов (host + session, без пароля)."""
     if not proxy:
         return "direct"
     try:
         parsed = urlparse(proxy)
         host = parsed.hostname or "?"
         port = parsed.port
-        return f"{host}:{port}" if port else host
+        base = f"{host}:{port}" if port else host
+        user = parsed.username or ""
+        if "session-" in user:
+            sess = user.split("session-", 1)[-1].split("_")[0][:12]
+            return f"{base}#{sess}"
+        if user:
+            return f"{base}#{user[:10]}"
+        return base
     except Exception:
         return "proxy"
 

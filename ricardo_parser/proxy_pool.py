@@ -25,6 +25,12 @@ class RicardoProxyPool:
             seen.add(key)
             uniq.append(p)
         self.proxies = uniq or [None]
+        labels = [proxy_label(p) for p in self.proxies]
+        logger.info(
+            "ricardo proxy pool: %s proxies → %s",
+            len(self.proxies),
+            ", ".join(labels),
+        )
         self._sessions: dict[str, aiohttp.ClientSession] = {}
         self._connectors: dict[str, aiohttp.BaseConnector] = {}
         self._failed_warmup: set[str] = set()

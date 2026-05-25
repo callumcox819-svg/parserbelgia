@@ -257,4 +257,16 @@ async def parse_ricardo_categories(
         )
 
     items = [article_to_void_item(a) for a in raw_articles[:limit]]
-    return {"items": items}
+    enriched = sum(
+        1
+        for a, item in zip(raw_articles[:limit], items)
+        if (item.get("item_photo") or item.get("item_price"))
+    )
+    return {
+        "items": items,
+        "stats": {
+            "total": len(items),
+            "enriched": enriched,
+            "proxies": len(proxy_list),
+        },
+    }

@@ -64,8 +64,23 @@ async def run_parser(callback: CallbackQuery) -> None:
 
     try:
         limit = settings["json_limit"]
+        stats = result.get("stats") or {}
+        extra = ""
+        if platform == "ricardo" and stats:
+            enriched = int(stats.get("enriched") or 0)
+            proxies_n = int(stats.get("proxies") or 0)
+            extra = (
+                f"\n📸 С фото/ценой: **{enriched}** из {count}\n"
+                f"🌐 Прокси в пуле: **{proxies_n}**"
+            )
+            if enriched < count * 0.3:
+                extra += (
+                    "\n\n⚠️ Много **403 Cloudflare** — Ricardo режет карточки. "
+                    "В логах смотрите `host#session` (разные session = разные прокси). "
+                    "Нужен residential **CH** или меньше лимит (10–20)."
+                )
         await status.edit_text(
-            f"✅ Готово ({plat_label}): **{count}** объявлений (лимит {limit}).",
+            f"✅ Готово ({plat_label}): **{count}** объявлений (лимит {limit}).{extra}",
             parse_mode="Markdown",
         )
         await callback.message.answer_document(
