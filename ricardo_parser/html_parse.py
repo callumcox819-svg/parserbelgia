@@ -13,6 +13,26 @@ _NEXT_DATA_RE = re.compile(
     r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>',
     re.DOTALL | re.IGNORECASE,
 )
+_LISTING_ARRAY_KEYS = (
+    "articles",
+    "listings",
+    "searchResults",
+    "results",
+    "items",
+    "offers",
+    "openOffers",
+    "open_offers",
+)
+_CARD_MARKERS = (
+    "buyNowPrice",
+    "buy_now_price",
+    "bidPrice",
+    "bid_price",
+    "image",
+    "imageUrl",
+    "hasBuyNow",
+    "has_buy_now",
+)
 
 
 def _first_str(data: dict[str, Any], *keys: str) -> str:
@@ -23,40 +43,103 @@ def _first_str(data: dict[str, Any], *keys: str) -> str:
     return ""
 
 
-def _normalize_article(raw: dict[str, Any]) -> dict[str, Any] | None:
-    article_id = ""
+def _article_id(raw: dict[str, Any]) -> str:
     for key in _ARTICLE_ID_KEYS:
         val = raw.get(key)
         if val is not None and str(val).strip():
-            article_id = str(val).strip()
-            break
-    title = _first_str(raw, "title", "name")
-    if not article_id or not title:
+            return str(val).strip()
+    return ""
+
+
+def _normalize_image_url(url: str) -> str:
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = "https:" + url
+    if "ricardostatic.ch" in url and "/t_" in url:
+        return re.sub(r"/t_[^/]+", "/t_1000x750", url)
+    return url
+
+
+def _offer_date(raw: dict[str, Any]) -> str:
+    offer = raw.get("offer")
+    if isinstance(offer, dict):
+        return _first_str(offer, "start_date", "startDate", "creation_date", "creationDate")
+    return ""
+
+
+def _pick_price(raw: dict[str, Any]) -> Any:
+    for key in (
+        "buy_now_price",
+        "buyNowPrice",
+        "price",
+        "fixedPrice",
+        "fixed_price",
+    ):
+        val = raw.get(key)
+        if val is not None and val != "":
+            return val
+    offer = raw.get("offer")
+    if isinstance(offer, dict):
+        val = offer.get("price") or offer.get("buy_now_price") or offer.get("buyNowPrice")
+        if val is not None and val != "":
+            return val
+    pricing = raw.get("pricing")
+    if isinstance(pricing, dict):
+        return pricing.get("amount") or pricing.get("price")
+    return raw.get("bid_price", raw.get("bidPrice", raw.get("currentPrice")))
+
+
+def _looks_like_listing_card(raw: dict[str, Any]) -> bool:
+    aid = _article_id(raw)
+    if not aid.isdigit():
+        return False
+    if _first_str(raw, "title", "name"):
+        return True
+    return any(raw.get(k) is not None for k in _CARD_MARKERS)
+
+
+def _normalize_article(raw: dict[str, Any]) -> dict[str, Any] | None:
+    article_id = _article_id(raw)
+    if not article_id:
         return None
 
+    title = _first_str(raw, "title", "name", "displayTitle")
+    if not title:
+        desc = raw.get("description")
+        if isinstance(desc, dict):
+            html_desc = desc.get("html") or ""
+            if isinstance(html_desc, str) and html_desc.strip():
+                title = re.sub(r"<[^>]+>", " ", html_desc).strip()[:120]
     slug = _first_str(raw, "slug", "urlSlug", "seoSlug")
     href = _first_str(raw, "href", "url", "link")
     if href and not href.startswith("http"):
         href = f"https://www.ricardo.ch{href}" if href.startswith("/") else href
-    if not href and slug:
-        href = f"https://www.ricardo.ch/de/a/{slug}-{article_id}/"
-    elif not href:
-        href = f"https://www.ricardo.ch/de/a/-{article_id}/"
+    if not href:
+        href = f"https://www.ricardo.ch/de/a/{article_id}/"
 
     seller_id = _first_str(raw, "sellerId", "seller_id", "sellerID")
     seller_name = _first_str(raw, "sellerName", "seller_name", "sellerNickname")
+    seller = raw.get("seller")
+    if isinstance(seller, dict):
+        if not seller_id:
+            seller_id = _first_str(seller, "id", "sellerId")
+        if not seller_name:
+            seller_name = _first_str(seller, "nickname", "name")
 
-    image = _first_str(raw, "image", "imageUrl", "thumbnail")
+    image = _normalize_image_url(_first_str(raw, "image", "imageUrl", "thumbnail"))
     if not image:
         images = raw.get("images") or raw.get("imageUrls") or []
         if isinstance(images, list) and images:
             first = images[0]
             if isinstance(first, str):
-                image = first
+                image = _normalize_image_url(first)
             elif isinstance(first, dict):
-                image = _first_str(first, "url", "src", "image")
+                image = _normalize_image_url(
+                    _first_str(first, "url", "src", "image", "href")
+                )
 
-    buy_now = raw.get("buy_now_price", raw.get("buyNowPrice"))
+    buy_now = _pick_price(raw)
     bid = raw.get("bid_price", raw.get("bidPrice", raw.get("currentPrice")))
     bids_count = raw.get("bids_count", raw.get("bidsCount", raw.get("bidCount")))
 
@@ -68,6 +151,9 @@ def _normalize_article(raw: dict[str, Any]) -> dict[str, Any] | None:
             location = _first_str(sh, "city", "zip_code", "zipCode")
     if not location:
         location = _first_str(raw, "city", "location")
+
+    if not title and slug:
+        title = slug.replace("-", " ").strip()
 
     return {
         "id": article_id,
@@ -82,22 +168,100 @@ def _normalize_article(raw: dict[str, Any]) -> dict[str, Any] | None:
         "condition_key": _first_str(raw, "condition_key", "conditionKey"),
         "creation_date": _first_str(
             raw, "creation_date", "creationDate", "start_date", "startDate"
-        ),
+        )
+        or _offer_date(raw),
         "description": _first_str(raw, "description", "subtitle"),
         "location": location,
     }
 
 
-def _walk_json(node: Any, out: list[dict[str, Any]]) -> None:
+def _collect_listing_arrays(node: Any, depth: int = 0, max_depth: int = 8) -> list[list[dict[str, Any]]]:
+    found: list[list[dict[str, Any]]] = []
+    if depth > max_depth:
+        return found
     if isinstance(node, dict):
-        norm = _normalize_article(node)
-        if norm:
-            out.append(norm)
-        for val in node.values():
-            _walk_json(val, out)
+        for key, val in node.items():
+            if key in _LISTING_ARRAY_KEYS and isinstance(val, list) and val:
+                cards = [x for x in val if isinstance(x, dict) and _looks_like_listing_card(x)]
+                if cards:
+                    found.append(cards)
+            found.extend(_collect_listing_arrays(val, depth + 1, max_depth))
     elif isinstance(node, list):
         for item in node:
-            _walk_json(item, out)
+            found.extend(_collect_listing_arrays(item, depth + 1, max_depth))
+    return found
+
+
+def _pick_best_listing_batch(arrays: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    best: list[dict[str, Any]] = []
+    for batch in arrays:
+        if len(batch) > len(best):
+            best = batch
+    return best
+
+
+def _extract_from_next_data(data: dict[str, Any]) -> list[dict[str, Any]]:
+    page_props = data.get("props", {}).get("pageProps", {})
+    if not isinstance(page_props, dict):
+        return []
+
+    articles: list[dict[str, Any]] = []
+    for key in _LISTING_ARRAY_KEYS:
+        val = page_props.get(key)
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict):
+                    norm = _normalize_article(item)
+                    if norm:
+                        articles.append(norm)
+
+    nested = page_props.get("data") or page_props.get("search") or page_props.get("category")
+    if isinstance(nested, dict):
+        for key in _LISTING_ARRAY_KEYS:
+            val = nested.get(key)
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict):
+                        norm = _normalize_article(item)
+                        if norm:
+                            articles.append(norm)
+
+    if not articles:
+        batch = _pick_best_listing_batch(_collect_listing_arrays(page_props))
+        for item in batch:
+            norm = _normalize_article(item)
+            if norm:
+                articles.append(norm)
+
+    return articles
+
+
+def _articles_from_links(html: str) -> list[dict[str, Any]]:
+    articles: list[dict[str, Any]] = []
+    for rel in _LINK_RE.findall(html):
+        tail = rel.rstrip("/").split("-")[-1]
+        if not tail.isdigit():
+            continue
+        slug_part = rel.split("/")[-2] if rel.endswith("/") else rel.split("/")[-1]
+        title = slug_part.replace("-", " ")[:120] if slug_part else ""
+        articles.append(
+            {
+                "id": tail,
+                "title": title,
+                "href": f"https://www.ricardo.ch/de/a/{tail}/",
+                "image": "",
+                "buy_now_price": None,
+                "bid_price": None,
+                "bids_count": None,
+                "seller_id": "",
+                "seller_name": "",
+                "condition_key": "",
+                "creation_date": "",
+                "description": "",
+                "location": "",
+            }
+        )
+    return articles
 
 
 def _dedupe_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -112,36 +276,33 @@ def _dedupe_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return unique
 
 
+def article_needs_enrichment(article: dict[str, Any]) -> bool:
+    if not article.get("image"):
+        return True
+    if article.get("buy_now_price") in (None, "") and article.get("bid_price") in (
+        None,
+        "",
+    ):
+        return True
+    if not str(article.get("seller_name") or "").strip():
+        return True
+    title = str(article.get("title") or "")
+    if title and title == title.lower() and len(title) > 20:
+        return True
+    return False
+
+
 def extract_articles_from_html(html: str) -> list[dict[str, Any]]:
     articles: list[dict[str, Any]] = []
     match = _NEXT_DATA_RE.search(html)
     if match:
         try:
             data = json.loads(match.group(1))
-            _walk_json(data, articles)
+            articles = _extract_from_next_data(data)
         except json.JSONDecodeError:
             pass
 
     if not articles:
-        for rel in _LINK_RE.findall(html):
-            tail = rel.rstrip("/").split("-")[-1]
-            if tail.isdigit():
-                articles.append(
-                    {
-                        "id": tail,
-                        "title": rel.split("/")[-2].replace("-", " ")[:80],
-                        "href": f"https://www.ricardo.ch{rel}",
-                        "image": "",
-                        "buy_now_price": None,
-                        "bid_price": None,
-                        "bids_count": None,
-                        "seller_id": "",
-                        "seller_name": "",
-                        "condition_key": "",
-                        "creation_date": "",
-                        "description": "",
-                        "location": "",
-                    }
-                )
+        articles = _articles_from_links(html)
 
     return _dedupe_articles(articles)

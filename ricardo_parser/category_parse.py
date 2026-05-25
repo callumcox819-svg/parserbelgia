@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
-from .html_parse import extract_articles_from_html
+from .article_detail import article_page_url, parse_article_page_html
+from .html_parse import article_needs_enrichment, extract_articles_from_html
 from .http_client import BROWSER_HEADERS, browse_session, category_page_url, throttle
 from .void_format import article_to_void_item
 
@@ -11,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES_PER_CATEGORY = 30
 PAGE_SIZE_HINT = 48
+
+
+def _enrich_enabled() -> bool:
+    raw = os.environ.get("RICARDO_ENRICH_DETAILS", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def _http_error(
@@ -39,6 +46,40 @@ def _http_error(
     return RuntimeError(msg)
 
 
+async def _enrich_article(
+    session: Any,
+    article: dict[str, Any],
+    *,
+    proxy: str | None,
+) -> dict[str, Any]:
+    article_id = str(article.get("id") or "").strip()
+    if not article_id:
+        return article
+
+    url = article_page_url(article_id)
+    await throttle()
+    async with session.get(url, headers=BROWSER_HEADERS) as resp:
+        html = await resp.text()
+        if resp.status >= 400:
+            logger.warning("ricardo article %s HTTP %s", article_id, resp.status)
+            return article
+
+    detail = parse_article_page_html(html, article_id=article_id)
+    if not detail:
+        return article
+
+    merged = dict(article)
+    for key, val in detail.items():
+        if val is None or val == "":
+            continue
+        if key in ("title",) and merged.get("title") and not article_needs_enrichment(
+            article
+        ):
+            continue
+        merged[key] = val
+    return merged
+
+
 async def parse_ricardo_categories(
     category_slugs: list[str],
     *,
@@ -52,19 +93,20 @@ async def parse_ricardo_categories(
         raise ValueError("Нужна хотя бы одна категория")
 
     skip = set(skip_seller_ids) if skip_seller_ids else set()
-    items: list[dict[str, Any]] = []
+    raw_articles: list[dict[str, Any]] = []
     seen_items: set[str] = set()
     skipped_404: list[str] = []
+    enrich = _enrich_enabled()
 
     async with browse_session(proxy) as (session, _kw):
         for slug in category_slugs:
-            if len(items) >= limit:
+            if len(raw_articles) >= limit:
                 break
 
             page = 1
             empty_streak = 0
             category_failed = False
-            while len(items) < limit and page <= MAX_PAGES_PER_CATEGORY:
+            while len(raw_articles) < limit and page <= MAX_PAGES_PER_CATEGORY:
                 await throttle()
                 url = category_page_url(slug, page)
                 async with session.get(url, headers=BROWSER_HEADERS) as resp:
@@ -100,11 +142,11 @@ async def parse_ricardo_categories(
                             continue
 
                     seen_items.add(aid)
-                    items.append(article_to_void_item(article))
+                    raw_articles.append(article)
                     if seller_id is not None:
                         skip.add(seller_id)
                     added += 1
-                    if len(items) >= limit:
+                    if len(raw_articles) >= limit:
                         break
 
                 if added == 0:
@@ -116,10 +158,26 @@ async def parse_ricardo_categories(
             if category_failed:
                 continue
 
-    if not items and skipped_404 and len(skipped_404) == len(category_slugs):
+        if enrich:
+            for idx, article in enumerate(raw_articles):
+                if not article_needs_enrichment(article):
+                    continue
+                try:
+                    raw_articles[idx] = await _enrich_article(
+                        session, article, proxy=proxy
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "ricardo enrich %s failed: %s",
+                        article.get("id"),
+                        exc,
+                    )
+
+    if not raw_articles and skipped_404 and len(skipped_404) == len(category_slugs):
         raise RuntimeError(
             "Все выбранные категории Ricardo вернули 404. "
             "Перезапустите бота после деплоя или выберите другие категории."
         )
 
+    items = [article_to_void_item(a) for a in raw_articles[:limit]]
     return {"items": items}

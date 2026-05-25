@@ -115,6 +115,10 @@ def category_page_url(slug: str, page: int = 1) -> str:
     return url
 
 
+def article_page_url(article_id: str) -> str:
+    return f"{BASE}/{LANG}/a/{article_id.strip()}/"
+
+
 @asynccontextmanager
 async def browse_session(
     proxy: str | None,
