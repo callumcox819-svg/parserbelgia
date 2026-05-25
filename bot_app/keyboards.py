@@ -7,17 +7,21 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from bot_app.categories import L1_CATEGORIES
+from bot_app.category_registry import categories_for_platform
+from bot_app.platforms import PLATFORMS, PLATFORM_2DEHANDS, PLATFORM_RICARDO
 
 CB_MAIN_PARSE = "main:parse"
 CB_MAIN_SETTINGS = "main:settings"
 CB_MAIN_ADMIN = "main:admin"
 
+CB_SET_PLATFORM = "set:platform"
 CB_SET_CATEGORIES = "set:categories"
 CB_SET_LIMIT = "set:limit"
 CB_SET_PROXY = "set:proxy"
 CB_SET_BACK = "set:back"
+CB_SET_MENU = "set:menu"
 
+CB_PLATFORM_PREFIX = "plat:"
 CB_CAT_TOGGLE = "cat:"
 CB_CAT_ALL_ON = "cat:all:on"
 CB_CAT_ALL_OFF = "cat:all:off"
@@ -43,6 +47,11 @@ def main_menu_keyboard(*, is_admin: bool) -> InlineKeyboardMarkup:
 def settings_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🏪 Площадка", callback_data=CB_SET_PLATFORM
+                )
+            ],
             [InlineKeyboardButton(text="📂 Категории", callback_data=CB_SET_CATEGORIES)],
             [
                 InlineKeyboardButton(
@@ -55,14 +64,31 @@ def settings_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def categories_keyboard(states: dict[str, bool]) -> InlineKeyboardMarkup:
+def platform_keyboard(current: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for key in (PLATFORM_2DEHANDS, PLATFORM_RICARDO):
+        meta = PLATFORMS[key]
+        mark = "✅ " if key == current else ""
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{mark}{meta['label']}",
+                    callback_data=f"{CB_PLATFORM_PREFIX}{key}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def categories_keyboard(states: dict[str, bool], platform: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(text="✅ Выбрать все", callback_data=CB_CAT_ALL_ON),
             InlineKeyboardButton(text="⬜ Снять все", callback_data=CB_CAT_ALL_OFF),
         ],
     ]
-    for cat in L1_CATEGORIES:
+    for cat in categories_for_platform(platform):
         on = states.get(cat.key, False)
         mark = "✅" if on else "⬜"
         rows.append(
@@ -73,7 +99,7 @@ def categories_keyboard(states: dict[str, bool]) -> InlineKeyboardMarkup:
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_BACK)])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

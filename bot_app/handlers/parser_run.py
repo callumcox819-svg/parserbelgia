@@ -11,7 +11,9 @@ from aiogram.types import CallbackQuery, FSInputFile
 
 from bot_app.app_config import SETTINGS
 from bot_app.keyboards import CB_MAIN_PARSE
+from bot_app.platforms import normalize_platform
 from bot_app.services.parser_runner import run_user_parse
+from bot_app.storage import repo
 
 router = Router(name="parser")
 logger = logging.getLogger(__name__)
@@ -21,7 +23,10 @@ logger = logging.getLogger(__name__)
 async def run_parser(callback: CallbackQuery) -> None:
     uid = callback.from_user.id
     await callback.answer()
-    status = await callback.message.answer("⏳ Парсинг…")
+    settings = await repo.get_user_settings(uid)
+    platform = normalize_platform(settings.get("platform"))
+    plat_label = "Ricardo" if platform == "ricardo" else "2dehands"
+    status = await callback.message.answer(f"⏳ Парсинг {plat_label}…")
 
     try:
         result = await run_user_parse(uid, SETTINGS.get("proxy"))
@@ -42,10 +47,11 @@ async def run_parser(callback: CallbackQuery) -> None:
         return
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_prefix = f"{platform}_{uid}_{stamp}_"
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".json",
-        prefix=f"2dehands_{uid}_{stamp}_",
+        prefix=file_prefix,
         delete=False,
         encoding="utf-8",
     ) as tmp:
@@ -53,16 +59,13 @@ async def run_parser(callback: CallbackQuery) -> None:
         tmp_path = Path(tmp.name)
 
     try:
-        from bot_app.storage import repo as user_repo
-
-        settings = await user_repo.get_user_settings(uid)
         limit = settings["json_limit"]
         await status.edit_text(
-            f"✅ Готово: **{count}** объявлений (лимит {limit}).",
+            f"✅ Готово ({plat_label}): **{count}** объявлений (лимит {limit}).",
             parse_mode="Markdown",
         )
         await callback.message.answer_document(
-            FSInputFile(tmp_path, filename=f"2dehands_{stamp}.json"),
+            FSInputFile(tmp_path, filename=f"{platform}_{stamp}.json"),
             caption=f"{count} items",
         )
     finally:
