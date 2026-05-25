@@ -1,19 +1,39 @@
 from __future__ import annotations
 
-import json
+import asyncio
+import os
+import random
 from typing import Any
 
-from .http_client import API_HEADERS, search_session
-from .parser import _fetch_search_page, _search_request_from_response
-from .url_builder import API_SEARCH, api_url_from_params
+from .http_client import search_session
+from .parser import _fetch_search_page
+from .url_builder import api_url_from_params
 from .void_format import listing_to_void_item
+
+# POST /lrp/api/search часто даёт 403; пагинация только через GET.
+PAGE_SIZE = 100
+
+
+def _request_delay_sec() -> float:
+    raw = os.environ.get("PARSE_REQUEST_DELAY", "0.8")
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.8
+
+
+async def _throttle() -> None:
+    delay = _request_delay_sec()
+    if delay > 0:
+        await asyncio.sleep(delay + random.uniform(0, 0.3))
 
 
 def _http_error(status: int, raw: str, proxy: str | None) -> RuntimeError:
     if status == 403:
         msg = (
             "HTTP 403 Forbidden — 2dehands отклонил запрос. "
-            "Проверьте BE/EU прокси в настройках (формат http://user:pass@host:port)."
+            "Нужен рабочий BE/EU прокси (socks5://user:pass@host:port). "
+            "Если прокси новый — подождите 1–2 мин и повторите."
         )
         if proxy:
             msg += " Сейчас используется ваш прокси."
@@ -50,48 +70,25 @@ async def parse_l1_categories(
                 "attributesByKey[]": ["Language:all-languages"],
             }
             offset = 0
-            search_request: dict[str, Any] | None = None
-            use_post = False
 
             while len(items) < limit:
-                page_limit = min(limit - len(items), 100)
-
-                if use_post and search_request:
-                    req_copy = json.loads(json.dumps(search_request))
-                    req_copy.setdefault("pagination", {})
-                    req_copy["pagination"]["limit"] = page_limit
-                    req_copy["pagination"]["offset"] = offset
-                    async with session.post(
-                        API_SEARCH,
-                        json=req_copy,
-                        headers={
-                            **API_HEADERS,
-                            "Content-Type": "application/json",
-                        },
-                        **request_kwargs,
-                    ) as resp:
-                        raw = await resp.text()
-                        if resp.status == 204 or not raw.strip():
-                            break
-                        if resp.status >= 400:
-                            raise _http_error(resp.status, raw, proxy)
-                        data = json.loads(raw)
-                else:
-                    api_url = api_url_from_params(
-                        base_params, limit=page_limit, offset=offset
-                    )
+                page_limit = min(limit - len(items), PAGE_SIZE)
+                await _throttle()
+                api_url = api_url_from_params(
+                    base_params, limit=page_limit, offset=offset
+                )
+                try:
                     data = await _fetch_search_page(
                         session, api_url, request_kwargs=request_kwargs
                     )
+                except RuntimeError as exc:
+                    if "403" not in str(exc):
+                        raise
+                    raise _http_error(403, str(exc), proxy) from exc
 
                 listings = data.get("listings") or []
                 if not listings:
                     break
-
-                if search_request is None:
-                    search_request = _search_request_from_response(data)
-                    if search_request:
-                        use_post = True
 
                 for listing in listings:
                     item_id = listing.get("itemId")
@@ -111,6 +108,9 @@ async def parse_l1_categories(
 
                     if len(items) >= limit:
                         break
+
+                if len(items) >= limit:
+                    break
 
                 total = int(data.get("totalResultCount") or 0)
                 offset += page_limit

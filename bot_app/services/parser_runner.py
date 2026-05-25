@@ -7,7 +7,7 @@ from bot_app.categories import CATEGORY_BY_KEY
 from bot_app.storage import repo
 from settings import normalize_proxy
 from twodehands_parser.category_parse import parse_l1_categories
-from twodehands_parser.http_client import search_session
+from twodehands_parser.http_client import BROWSER_HEADERS, search_session
 from twodehands_parser.url_builder import BASE, extract_l1_category_id
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,9 @@ async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
 
     page_url = f"{BASE}/l/{category_key}/"
     async with search_session(proxy) as (session, request_kwargs):
-        async with session.get(page_url, **request_kwargs) as resp:
+        async with session.get(
+            page_url, headers=BROWSER_HEADERS, **request_kwargs
+        ) as resp:
             html = await resp.text()
             if resp.status >= 400:
                 raise RuntimeError(f"Категория HTTP {resp.status}")

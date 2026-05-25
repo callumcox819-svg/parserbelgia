@@ -8,7 +8,6 @@ from typing import Any
 import aiohttp
 
 from .url_builder import (
-    API_SEARCH,
     BASE,
     api_url_from_params,
     build_api_params_from_browser_url,
@@ -79,13 +78,6 @@ async def _fetch_search_page(
     return data
 
 
-def _search_request_from_response(data: dict[str, Any]) -> dict[str, Any] | None:
-    req = data.get("searchRequest")
-    if isinstance(req, dict):
-        return req
-    return None
-
-
 async def parse_2dehands(
     source_url: str,
     *,
@@ -108,8 +100,6 @@ async def parse_2dehands(
     seen_ids: set[str] = set()
     offset = int(base_params.get("offset", 0) or 0)
     pages = 0
-    search_request: dict[str, Any] | None = None
-    use_post_body = False
 
     async with search_session(proxy) as (session, req_kw):
         base_params = await _resolve_category_id(
@@ -122,39 +112,16 @@ async def parse_2dehands(
             pages += 1
             page_limit = min(limit - len(items), 100)
 
-            if use_post_body and search_request:
-                req_copy = json.loads(json.dumps(search_request))
-                req_copy.setdefault("pagination", {})
-                req_copy["pagination"]["limit"] = page_limit
-                req_copy["pagination"]["offset"] = offset
-                async with session.post(
-                    API_SEARCH,
-                    json=req_copy,
-                    headers={**API_HEADERS, "Content-Type": "application/json"},
-                    **req_kw,
-                ) as resp:
-                    raw = await resp.text()
-                    if resp.status == 204 or not raw.strip():
-                        break
-                    if resp.status >= 400:
-                        raise RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
-                    data = json.loads(raw)
-            else:
-                api_url = api_url_from_params(
-                    base_params, limit=page_limit, offset=offset
-                )
-                data = await _fetch_search_page(
-                    session, api_url, request_kwargs=req_kw
-                )
+            api_url = api_url_from_params(
+                base_params, limit=page_limit, offset=offset
+            )
+            data = await _fetch_search_page(
+                session, api_url, request_kwargs=req_kw
+            )
 
             listings = data.get("listings") or []
             if not listings:
                 break
-
-            if search_request is None:
-                search_request = _search_request_from_response(data)
-                if search_request:
-                    use_post_body = True
 
             for listing in listings:
                 item_id = listing.get("itemId")
@@ -165,6 +132,9 @@ async def parse_2dehands(
                 items.append(listing_to_void_item(listing))
                 if len(items) >= limit:
                     break
+
+            if len(items) >= limit:
+                break
 
             total = int(data.get("totalResultCount") or 0)
             offset += page_limit
