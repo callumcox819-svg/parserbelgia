@@ -13,6 +13,20 @@ copy config.example.py config.py
 
 В `config.py` укажите `BOT_TOKEN` от [@BotFather](https://t.me/BotFather).
 
+### Railway / Docker
+
+Переменные окружения (приоритетнее `config.py`):
+
+| Variable | Пример |
+|----------|--------|
+| `BOT_TOKEN` | `123456:ABC...` |
+| `PROXY` | `http://user:pass@host:10789` |
+| `DEFAULT_LIMIT` | `50` |
+
+**Важно:** `PROXY` и `BOT_TOKEN` — только строки в кавычках в `config.py` или как env на Railway.  
+Неверно: `PROXY = user:pass@host:port` → `SyntaxError`  
+Верно: `PROXY = "http://user:pass@host:port"`
+
 ## CLI
 
 ```bash

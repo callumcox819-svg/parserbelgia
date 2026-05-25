@@ -15,14 +15,10 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message
 
+from settings import load_settings
 from twodehands_parser import parse_2dehands
 
-try:
-    import config
-except ImportError as exc:
-    raise SystemExit(
-        "Создайте config.py из config.example.py и укажите BOT_TOKEN."
-    ) from exc
+SETTINGS = load_settings()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,7 +51,7 @@ async def cmd_parse(message: Message) -> None:
         await message.answer("Использование: /parse <url> [limit]")
         return
     url = parts[1]
-    limit = int(parts[2]) if len(parts) > 2 else getattr(config, "DEFAULT_LIMIT", 50)
+    limit = int(parts[2]) if len(parts) > 2 else SETTINGS["default_limit"]
     await _run_parse(message, url, limit)
 
 
@@ -64,13 +60,13 @@ async def on_text(message: Message) -> None:
     match = URL_RE.search(message.text or "")
     if not match:
         return
-    limit = getattr(config, "DEFAULT_LIMIT", 50)
+    limit = SETTINGS["default_limit"]
     await _run_parse(message, match.group(0), limit)
 
 
 async def _run_parse(message: Message, url: str, limit: int) -> None:
     status = await message.answer(f"Парсинг… (до {limit} объявлений)")
-    proxy = getattr(config, "PROXY", None)
+    proxy = SETTINGS["proxy"]
     try:
         result = await parse_2dehands(url, limit=limit, proxy=proxy)
     except Exception as exc:
@@ -105,9 +101,11 @@ async def _run_parse(message: Message, url: str, limit: int) -> None:
 
 
 async def main() -> None:
-    token = getattr(config, "BOT_TOKEN", "") or ""
-    if not token.strip():
-        raise SystemExit("Укажите BOT_TOKEN в config.py")
+    token = SETTINGS["bot_token"] or ""
+    if not token:
+        raise SystemExit(
+            "Укажите BOT_TOKEN в config.py или переменной окружения BOT_TOKEN."
+        )
 
     bot = Bot(token=token)
     await dp.start_polling(bot)

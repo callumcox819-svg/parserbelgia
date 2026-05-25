@@ -11,12 +11,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from settings import load_settings
 from twodehands_parser import parse_2dehands_sync
 
-try:
-    import config
-except ImportError:
-    config = None  # type: ignore
+SETTINGS = load_settings()
 
 
 def _default_output() -> Path:
@@ -43,14 +41,9 @@ def main() -> int:
         format="%(levelname)s: %(message)s",
     )
 
-    limit = args.limit
-    if limit is None and config is not None:
-        limit = getattr(config, "DEFAULT_LIMIT", 50)
-    limit = limit or 50
+    limit = args.limit if args.limit is not None else SETTINGS["default_limit"]
 
-    proxy = args.proxy
-    if proxy is None and config is not None:
-        proxy = getattr(config, "PROXY", None)
+    proxy = args.proxy if args.proxy is not None else SETTINGS["proxy"]
     if proxy is None:
         proxy = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
 
