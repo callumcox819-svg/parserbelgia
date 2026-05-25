@@ -212,9 +212,9 @@ async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
         f"🌐 Прокси ({hint}):\n"
         "SOCKS5: `socks5://login:pass@host:port`\n"
+        "или LomaProxy: `host:port:login:pass`\n"
         "HTTP: `http://login:pass@host:port`\n\n"
-        "Для SOCKS5 обязательно префикс socks5://\n"
-        "Сброс: `0` или `off`",
+        "Одна строка. Сброс: `0` или `off`",
         parse_mode="Markdown",
         reply_markup=cancel_keyboard(),
     )
@@ -241,7 +241,18 @@ async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -
         return
     proxy = normalize_proxy(text)
     if not proxy:
-        await message.answer("Некорректный прокси.")
+        await message.answer(
+            "Некорректный прокси.\n"
+            "Форматы:\n"
+            "`socks5://login:pass@host:port`\n"
+            "`host:port:login:pass` (LomaProxy)"
+        )
+        return
+    if "://" not in proxy or "@" not in proxy:
+        await message.answer(
+            "Не удалось разобрать прокси. Пример LomaProxy:\n"
+            "`proxy.lomaproxy.com:48174:USER:PASS`"
+        )
         return
     await repo.set_proxy(message.from_user.id, proxy)
     await state.clear()

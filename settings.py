@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 from types import ModuleType
 from typing import Any
+from urllib.parse import quote
 
 
 def _from_config(name: str, config: ModuleType | None) -> Any:
@@ -20,19 +22,66 @@ def _str_or_none(value: Any) -> str | None:
     return text or None
 
 
+_SCHEME_PREFIXES = (
+    "http://",
+    "https://",
+    "socks5://",
+    "socks5h://",
+    "socks4://",
+    "socks4a://",
+)
+
+
+def _quote_userinfo(value: str) -> str:
+    return quote(value, safe="")
+
+
+def _host_port_user_pass_to_url(p: str, *, scheme: str = "socks5") -> str | None:
+    """LomaProxy и др.: host:port:username:password"""
+    if "@" in p:
+        return None
+    parts = p.split(":")
+    if len(parts) < 4:
+        return None
+    host = parts[0].strip()
+    port = parts[1].strip()
+    if not host or not port.isdigit():
+        return None
+    user = parts[2].strip()
+    password = ":".join(parts[3:]).strip()
+    if not user or not password:
+        return None
+    return (
+        f"{scheme}://{_quote_userinfo(user)}:{_quote_userinfo(password)}"
+        f"@{host}:{port}"
+    )
+
+
 def normalize_proxy(proxy: str | None) -> str | None:
     if not proxy:
         return None
-    p = proxy.strip()
+    p = proxy.strip().splitlines()[0].strip()
+    if not p:
+        return None
     lower = p.lower()
-    if lower.startswith(
-        ("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")
-    ):
+    if lower.startswith(_SCHEME_PREFIXES):
         return p
     if lower.startswith("socks5:"):
         return "socks5://" + p[7:].lstrip("/")
     if lower.startswith("socks4:"):
         return "socks4://" + p[7:].lstrip("/")
+
+    loma = _host_port_user_pass_to_url(p, scheme="socks5")
+    if loma:
+        return loma
+
+    if "@" in p and re.match(r"^[^:@\s]+:[^@\s]+@[^@\s]+:\d+$", p):
+        user, rest = p.split("@", 1)
+        return f"socks5://{user}@{rest}"
+
+    if re.match(r"^[^:@\s]+:[^:@\s]+@[^@\s]+:\d+$", p):
+        return f"socks5://{p}"
+
     return "http://" + p
 
 
