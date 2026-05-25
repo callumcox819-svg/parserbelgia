@@ -5,6 +5,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot_app.keyboards import (
+    CB_CAT_ALL_OFF,
+    CB_CAT_ALL_ON,
     CB_CAT_TOGGLE,
     CB_SET_BACK,
     CB_SET_CATEGORIES,
@@ -45,15 +47,52 @@ async def open_settings(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+async def _categories_text(uid: int) -> str:
+    n = await repo.count_enabled_categories(uid)
+    total = len(await repo.get_category_states(uid))
+    return (
+        f"📂 Категории (вкл/выкл). Включено: **{n}** из {total}\n\n"
+        "Или «Выбрать все» / «Снять все»."
+    )
+
+
 @router.callback_query(F.data == CB_SET_CATEGORIES)
 async def open_categories(callback: CallbackQuery) -> None:
     uid = callback.from_user.id
+    await repo.ensure_user(uid, callback.from_user.username)
     states = await repo.get_category_states(uid)
     await callback.message.edit_text(
-        "📂 Выберите категории (нажмите для вкл/выкл):",
+        await _categories_text(uid),
         reply_markup=categories_keyboard(states),
+        parse_mode="Markdown",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == CB_CAT_ALL_ON)
+async def categories_all_on(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await repo.set_all_categories(uid, True)
+    states = await repo.get_category_states(uid)
+    await callback.message.edit_text(
+        await _categories_text(uid),
+        reply_markup=categories_keyboard(states),
+        parse_mode="Markdown",
+    )
+    await callback.answer("Все категории включены")
+
+
+@router.callback_query(F.data == CB_CAT_ALL_OFF)
+async def categories_all_off(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await repo.set_all_categories(uid, False)
+    states = await repo.get_category_states(uid)
+    await callback.message.edit_text(
+        await _categories_text(uid),
+        reply_markup=categories_keyboard(states),
+        parse_mode="Markdown",
+    )
+    await callback.answer("Все категории выключены")
 
 
 @router.callback_query(F.data.startswith(CB_CAT_TOGGLE))
@@ -62,7 +101,11 @@ async def toggle_category(callback: CallbackQuery) -> None:
     key = callback.data.removeprefix(CB_CAT_TOGGLE)
     await repo.toggle_category(uid, key)
     states = await repo.get_category_states(uid)
-    await callback.message.edit_reply_markup(reply_markup=categories_keyboard(states))
+    await callback.message.edit_text(
+        await _categories_text(uid),
+        reply_markup=categories_keyboard(states),
+        parse_mode="Markdown",
+    )
     await callback.answer()
 
 

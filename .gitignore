@@ -10,3 +10,5 @@ venv/
 output/
 results/
 data/
+# но не игнорировать путь на сервере — локально data/ в gitignore
+!/data/.gitkeep

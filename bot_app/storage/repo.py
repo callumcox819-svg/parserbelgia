@@ -100,6 +100,21 @@ async def get_category_states(user_id: int) -> dict[str, bool]:
     return {key: bool(enabled) for key, enabled in rows}
 
 
+async def set_all_categories(user_id: int, enabled: bool) -> None:
+    val = 1 if enabled else 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE user_categories SET enabled = ? WHERE user_id = ?",
+            (val, user_id),
+        )
+        await db.commit()
+
+
+async def count_enabled_categories(user_id: int) -> int:
+    states = await get_category_states(user_id)
+    return sum(1 for on in states.values() if on)
+
+
 async def toggle_category(user_id: int, category_key: str) -> bool:
     states = await get_category_states(user_id)
     new_val = not states.get(category_key, False)

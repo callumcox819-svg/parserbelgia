@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import aiosqlite
 
-DB_PATH = Path(os.environ.get("DATABASE_PATH", "data/bot.db"))
+logger = logging.getLogger(__name__)
+
+
+def resolve_db_path() -> Path:
+    """Путь к SQLite. На Railway — volume /app/data (не стирается при деплое)."""
+    explicit = os.environ.get("DATABASE_PATH")
+    if explicit:
+        return Path(explicit)
+    on_railway = bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+    if on_railway:
+        return Path("/app/data/bot.db")
+    return Path("data/bot.db")
+
+
+DB_PATH = resolve_db_path()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -44,3 +63,4 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(_SCHEMA)
         await db.commit()
+    logger.info("Database: %s", DB_PATH.resolve())

@@ -19,6 +19,8 @@ CB_SET_PROXY = "set:proxy"
 CB_SET_BACK = "set:back"
 
 CB_CAT_TOGGLE = "cat:"
+CB_CAT_ALL_ON = "cat:all:on"
+CB_CAT_ALL_OFF = "cat:all:off"
 
 CB_ADMIN_GRANT = "admin:grant"
 CB_ADMIN_REVOKE = "admin:revoke"
@@ -54,7 +56,12 @@ def settings_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 def categories_keyboard(states: dict[str, bool]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="✅ Выбрать все", callback_data=CB_CAT_ALL_ON),
+            InlineKeyboardButton(text="⬜ Снять все", callback_data=CB_CAT_ALL_OFF),
+        ],
+    ]
     for cat in L1_CATEGORIES:
         on = states.get(cat.key, False)
         mark = "✅" if on else "⬜"

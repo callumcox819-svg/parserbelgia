@@ -23,6 +23,19 @@ copy config.example.py config.py
 |----------|----------|
 | `BOT_TOKEN` | токен от @BotFather |
 | `PROXY` | `socks5://user:pass@host:1080` или `http://...` |
+| `DATABASE_PATH` | опционально, по умолчанию `/app/data/bot.db` на Railway |
+
+### База данных (не терять после деплоя)
+
+На Railway контейнер **без volume** стирается при каждом деплое.
+
+1. В проекте Railway: **Volume** → Create → mount path **`/app/data`**
+2. Привязать volume к сервису бота
+3. Redeploy
+
+В логах должно быть: `Database: /app/data/bot.db`
+
+Локально БД: `data/bot.db`
 | `DEFAULT_LIMIT` | `50` (опционально) |
 
 Сохранить → **Redeploy**.
