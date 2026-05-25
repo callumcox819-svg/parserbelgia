@@ -58,7 +58,37 @@ async def throttle() -> None:
     await asyncio.sleep(base + random.uniform(0.2, 0.8))
 
 
+async def _proxy_exit_geo(session: aiohttp.ClientSession) -> dict[str, Any]:
+    """Страна exit-IP через тот же прокси (то, что видит Ricardo)."""
+    url = "http://ip-api.com/json/?fields=status,query,country,countryCode,isp,hosting"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        if resp.status >= 400:
+            return {}
+        data = await resp.json(content_type=None)
+        return data if isinstance(data, dict) else {}
+
+
+async def _ensure_ch_proxy(session: aiohttp.ClientSession) -> dict[str, Any]:
+    geo = await _proxy_exit_geo(session)
+    if geo.get("status") != "success":
+        return geo
+    cc = (geo.get("countryCode") or "").upper()
+    if cc and cc != "CH":
+        country = geo.get("country") or cc
+        ip = geo.get("query") or "?"
+        hosting = geo.get("hosting")
+        kind = " (datacenter/hosting)" if hosting else ""
+        raise RuntimeError(
+            "Прокси для Ricardo выходит не из Швейцарии.\n"
+            f"Сайт видит IP **{ip}** → **{country} ({cc})**{kind}.\n"
+            "Нужен **residential CH** (не BE/US/NL). "
+            "У продавца часто пишут «CH», но реальный exit IP другой — проверьте в личном кабинете."
+        )
+    return geo
+
+
 async def warmup_session(session: aiohttp.ClientSession) -> None:
+    await _ensure_ch_proxy(session)
     async with session.get(f"{BASE}/{LANG}/", headers=BROWSER_HEADERS) as resp:
         body = await resp.text()
         if resp.status >= 400:
@@ -71,7 +101,8 @@ def _response_hint(status: int, body: str) -> str:
     if status == 403 and ("cloudflare" in low or "forbidden" in low):
         return (
             "HTTP 403 — Ricardo/Cloudflare заблокировал запрос. "
-            "Нужен residential прокси **Швейцарии (CH)**, BE-прокси не подходят."
+            "Нужен residential прокси с exit IP в **Швейцарии (CH)**. "
+            "Проверьте страну exit-IP у провайдера (не BE/US/NL)."
         )
     return f"Ricardo warmup HTTP {status}: {body[:200].replace(chr(10), ' ')}"
 
