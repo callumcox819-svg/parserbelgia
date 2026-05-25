@@ -29,7 +29,11 @@ async def run_parser(callback: CallbackQuery) -> None:
     status = await callback.message.answer(f"⏳ Парсинг {plat_label}…")
 
     try:
-        result = await run_user_parse(uid, SETTINGS.get("proxy"))
+        result = await run_user_parse(
+            uid,
+            SETTINGS.get("proxy"),
+            fallback_proxies=SETTINGS.get("proxies"),
+        )
     except ValueError as exc:
         await status.edit_text(f"⚠️ {exc}")
         return

@@ -11,3 +11,7 @@ DEFAULT_LIMIT = 50
 PROXY = "socks5://user:password@host:1080"
 # PROXY = "http://user:password@host:10789"
 # PROXY = None
+
+# Ricardo: несколько CH-прокси (по одному на строку в Railway Variables)
+# PROXIES = """socks5://user:pass@ch1:1080
+# socks5://user:pass@ch2:1080"""

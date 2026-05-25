@@ -24,7 +24,7 @@ from bot_app.category_registry import categories_for_platform
 from bot_app.platforms import PLATFORMS, normalize_platform
 from bot_app.states import SettingsForm
 from bot_app.storage import repo
-from settings import normalize_proxy
+from settings import normalize_proxy, parse_proxy_list
 
 router = Router(name="settings")
 
@@ -34,18 +34,22 @@ async def _settings_summary(user_id: int) -> str:
     platform = normalize_platform(s.get("platform"))
     plat = PLATFORMS[platform]
     keys = await repo.get_enabled_category_keys(user_id, platform)
-    proxy = s.get("proxy") or "не задан (глобальный с сервера)"
+    plist = parse_proxy_list(s.get("proxy"))
+    if plist:
+        proxy = f"**{len(plist)}** шт. (ротация)"
+    else:
+        proxy = "не задан (глобальный с сервера)"
     delay_hint = (
         "~0.8 с между запросами"
         if platform == "2dehands"
-        else "~2.5 с (медленнее, антифрод)"
+        else "~3.5 с + ротация прокси (антифрод Cloudflare)"
     )
     return (
         "⚙️ **Настройки**\n\n"
         f"🏪 Площадка: **{plat['title']}**\n"
         f"🔢 Лимит JSON: **{s['json_limit']}**\n"
         f"📂 Категорий включено: **{len(keys)}**\n"
-        f"🌐 Прокси ({plat['proxy_hint']}): `{proxy}`\n"
+        f"🌐 Прокси ({plat['proxy_hint']}): {proxy}\n"
         f"⏱ Скорость: {delay_hint}"
     )
 
@@ -214,7 +218,9 @@ async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
         "SOCKS5: `socks5://login:pass@host:port`\n"
         "или LomaProxy: `host:port:login:pass`\n"
         "HTTP: `http://login:pass@host:port`\n\n"
-        "Одна строка. Сброс: `0` или `off`",
+        "**Несколько прокси** — каждый с новой строки "
+        "(ротация при 403 Cloudflare).\n"
+        "Сброс: `0` или `off`",
         parse_mode="Markdown",
         reply_markup=cancel_keyboard(),
     )
@@ -239,24 +245,36 @@ async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -
             reply_markup=main_menu_keyboard(is_admin=is_admin_user),
         )
         return
-    proxy = normalize_proxy(text)
-    if not proxy:
-        await message.answer(
-            "Некорректный прокси.\n"
-            "Форматы:\n"
-            "`socks5://login:pass@host:port`\n"
-            "`host:port:login:pass` (LomaProxy)"
-        )
-        return
-    if "://" not in proxy or "@" not in proxy:
-        await message.answer(
-            "Не удалось разобрать прокси. Пример LomaProxy:\n"
-            "`proxy.lomaproxy.com:48174:USER:PASS`"
-        )
-        return
-    await repo.set_proxy(message.from_user.id, proxy)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) == 1 and "," in lines[0]:
+        lines = [p.strip() for p in lines[0].split(",") if p.strip()]
+
+    proxies: list[str] = []
+    for line in lines:
+        proxy = normalize_proxy(line)
+        if not proxy:
+            await message.answer(
+                f"Не разобрана строка:\n`{line[:80]}`\n\n"
+                "Форматы:\n"
+                "`socks5://login:pass@host:port`\n"
+                "`host:port:login:pass` (LomaProxy)"
+            )
+            return
+        if "://" not in proxy or "@" not in proxy:
+            await message.answer(
+                f"Не удалось разобрать:\n`{line[:80]}`\n"
+                "Пример LomaProxy:\n"
+                "`proxy.lomaproxy.com:48174:USER:PASS`"
+            )
+            return
+        proxies.append(proxy)
+
+    stored = "\n".join(proxies)
+    await repo.set_proxy(message.from_user.id, stored)
     await state.clear()
+    count = len(proxies)
     await message.answer(
-        "✅ Прокси сохранён.",
+        f"✅ Сохранено прокси: **{count}** (ротация при парсинге).",
         reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+        parse_mode="Markdown",
     )

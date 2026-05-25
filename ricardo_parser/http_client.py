@@ -5,6 +5,7 @@ import os
 import random
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -46,20 +47,62 @@ def create_connector(proxy: str | None) -> aiohttp.BaseConnector:
 
 
 def request_delay_sec() -> float:
-    raw = os.environ.get("RICARDO_REQUEST_DELAY", "2.5")
+    raw = os.environ.get("RICARDO_REQUEST_DELAY", "3.5")
     try:
         return max(1.0, float(raw))
     except ValueError:
-        return 2.5
+        return 3.5
 
 
-async def throttle() -> None:
+def enrich_delay_mult() -> float:
+    raw = os.environ.get("RICARDO_ENRICH_DELAY_MULT", "1.5")
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 1.5
+
+
+def blocked_cooldown_sec() -> float:
+    raw = os.environ.get("RICARDO_403_COOLDOWN", "90")
+    try:
+        return max(30.0, float(raw))
+    except ValueError:
+        return 90.0
+
+
+async def throttle(*, enrich: bool = False) -> None:
     base = request_delay_sec()
-    await asyncio.sleep(base + random.uniform(0.2, 0.8))
+    if enrich:
+        base *= enrich_delay_mult()
+    await asyncio.sleep(base + random.uniform(0.3, 1.2))
+
+
+async def throttle_after_block() -> None:
+    base = blocked_cooldown_sec()
+    await asyncio.sleep(base + random.uniform(0.0, 5.0))
+
+
+def navigation_headers(
+    referer: str | None = None,
+    *,
+    same_origin: bool = True,
+) -> dict[str, str]:
+    headers = dict(BROWSER_HEADERS)
+    if referer:
+        headers["Referer"] = referer
+        if same_origin and "ricardo.ch" in referer:
+            headers["sec-fetch-site"] = "same-origin"
+    return headers
+
+
+def is_blocked_response(status: int, body: str) -> bool:
+    if status in (403, 429, 503):
+        return True
+    low = (body or "")[:8000].lower()
+    return "cloudflare" in low or "cf-ray" in low or "attention required" in low
 
 
 async def _proxy_exit_geo(session: aiohttp.ClientSession) -> dict[str, Any]:
-    """Страна exit-IP через тот же прокси (то, что видит Ricardo)."""
     url = "http://ip-api.com/json/?fields=status,query,country,countryCode,isp,hosting"
     async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
         if resp.status >= 400:
@@ -89,21 +132,25 @@ async def _ensure_ch_proxy(session: aiohttp.ClientSession) -> dict[str, Any]:
 
 async def warmup_session(session: aiohttp.ClientSession) -> None:
     await _ensure_ch_proxy(session)
-    async with session.get(f"{BASE}/{LANG}/", headers=BROWSER_HEADERS) as resp:
+    headers = navigation_headers(f"{BASE}/{LANG}/", same_origin=False)
+    async with session.get(f"{BASE}/{LANG}/", headers=headers) as resp:
         body = await resp.text()
+        if is_blocked_response(resp.status, body):
+            raise RuntimeError(_response_hint(resp.status, body))
         if resp.status >= 400:
-            hint = _response_hint(resp.status, body)
-            raise RuntimeError(hint)
+            raise RuntimeError(_response_hint(resp.status, body))
 
 
 def _response_hint(status: int, body: str) -> str:
     low = body.lower()
-    if status == 403 and ("cloudflare" in low or "forbidden" in low):
+    if status == 403 and ("cloudflare" in low or "forbidden" in low or "cf-ray" in low):
         return (
             "HTTP 403 — Ricardo/Cloudflare заблокировал запрос. "
             "Нужен residential прокси с exit IP в **Швейцарии (CH)**. "
             "Проверьте страну exit-IP у провайдера (не BE/US/NL)."
         )
+    if status == 429:
+        return "HTTP 429 — слишком много запросов (Cloudflare rate limit)."
     return f"Ricardo warmup HTTP {status}: {body[:200].replace(chr(10), ' ')}"
 
 
@@ -117,6 +164,18 @@ def category_page_url(slug: str, page: int = 1) -> str:
 
 def article_page_url(article_id: str) -> str:
     return f"{BASE}/{LANG}/a/{article_id.strip()}/"
+
+
+def proxy_label(proxy: str | None) -> str:
+    if not proxy:
+        return "direct"
+    try:
+        parsed = urlparse(proxy)
+        host = parsed.hostname or "?"
+        port = parsed.port
+        return f"{host}:{port}" if port else host
+    except Exception:
+        return "proxy"
 
 
 @asynccontextmanager

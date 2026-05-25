@@ -57,6 +57,23 @@ def _host_port_user_pass_to_url(p: str, *, scheme: str = "socks5") -> str | None
     )
 
 
+def parse_proxy_list(proxy: str | None) -> list[str]:
+    """Несколько прокси: по одному на строку или через запятую/точку с запятой."""
+    if not proxy:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for chunk in re.split(r"[\n\r;,]+", proxy):
+        line = chunk.strip()
+        if not line:
+            continue
+        normalized = normalize_proxy(line)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            out.append(normalized)
+    return out
+
+
 def normalize_proxy(proxy: str | None) -> str | None:
     if not proxy:
         return None
@@ -114,6 +131,13 @@ def load_settings() -> dict[str, Any]:
     proxy = _str_or_none(os.environ.get("PROXY")) or _str_or_none(
         _from_config("PROXY", config_mod)
     )
+    proxies_blob = _str_or_none(os.environ.get("PROXIES")) or _str_or_none(
+        _from_config("PROXIES", config_mod)
+    )
+    proxy_list = parse_proxy_list(proxies_blob)
+    single = normalize_proxy(proxy)
+    if single and single not in proxy_list:
+        proxy_list.insert(0, single)
 
     admin_ids = _str_or_none(os.environ.get("ADMIN_IDS")) or _str_or_none(
         os.environ.get("ADMIN_ID")
@@ -122,6 +146,7 @@ def load_settings() -> dict[str, Any]:
     return {
         "bot_token": bot_token,
         "default_limit": default_limit,
-        "proxy": normalize_proxy(proxy),
+        "proxy": single,
+        "proxies": proxy_list,
         "admin_ids": admin_ids,
     }

@@ -6,7 +6,17 @@ from typing import Any
 
 from .article_detail import article_page_url, parse_article_page_html
 from .html_parse import article_needs_enrichment, extract_articles_from_html
-from .http_client import BROWSER_HEADERS, browse_session, category_page_url, throttle
+from .http_client import (
+    BASE,
+    LANG,
+    category_page_url,
+    is_blocked_response,
+    navigation_headers,
+    proxy_label,
+    throttle,
+    throttle_after_block,
+)
+from .proxy_pool import RicardoProxyPool, proxy_pool
 from .void_format import article_to_void_item
 
 logger = logging.getLogger(__name__)
@@ -20,15 +30,28 @@ def _enrich_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+def _normalize_proxies(
+    proxy: str | None,
+    proxies: list[str | None] | None,
+) -> list[str | None]:
+    if proxies:
+        return proxies
+    if proxy:
+        return [proxy]
+    return [None]
+
+
 def _http_error(
     status: int, body: str, proxy: str | None, *, url: str = ""
 ) -> RuntimeError:
     low = body.lower()
-    if status == 403 and ("cloudflare" in low or "forbidden" in low):
+    if status == 403 and (
+        "cloudflare" in low or "forbidden" in low or "cf-ray" in low
+    ):
         msg = (
             "HTTP 403 Forbidden — Ricardo/Cloudflare. "
-            "Используйте residential прокси **Швейцарии (CH)** "
-            "(socks5://user:pass@host:port)."
+            "Используйте несколько residential прокси **Швейцарии (CH)** "
+            "(socks5://user:pass@host:port), по одному на строку."
         )
     elif status == 404:
         msg = (
@@ -42,27 +65,73 @@ def _http_error(
             snippet = "страница ошибки Ricardo"
         msg = f"HTTP {status}" + (f" ({url})" if url else "") + f": {snippet}"
     if proxy:
-        msg += " Сейчас используется ваш прокси."
+        msg += f" Прокси: {proxy_label(proxy)}."
     return RuntimeError(msg)
 
 
+async def _fetch_html(
+    pool: RicardoProxyPool,
+    url: str,
+    *,
+    referer: str,
+    enrich: bool = False,
+) -> tuple[str, int, str | None]:
+    """GET с ротацией прокси при 403/429."""
+    last_status = 0
+    for proxy in pool.proxies_for_retry():
+        await throttle(enrich=enrich)
+        try:
+            session = await pool.get_session(proxy)
+        except Exception:
+            continue
+
+        headers = navigation_headers(referer)
+        try:
+            async with session.get(url, headers=headers) as resp:
+                html = await resp.text()
+                last_status = resp.status
+                if is_blocked_response(resp.status, html):
+                    logger.warning(
+                        "ricardo blocked %s HTTP %s proxy=%s",
+                        url,
+                        resp.status,
+                        proxy_label(proxy),
+                    )
+                    pool.mark_blocked(proxy)
+                    await throttle_after_block()
+                    continue
+                if resp.status >= 400:
+                    return html, resp.status, proxy
+                return html, resp.status, proxy
+        except Exception as exc:
+            logger.warning(
+                "ricardo request error %s proxy=%s: %s",
+                url,
+                proxy_label(proxy),
+                exc,
+            )
+            pool.mark_blocked(proxy, seconds=60)
+    return "", last_status, None
+
+
 async def _enrich_article(
-    session: Any,
+    pool: RicardoProxyPool,
     article: dict[str, Any],
     *,
-    proxy: str | None,
+    referer: str,
 ) -> dict[str, Any]:
     article_id = str(article.get("id") or "").strip()
     if not article_id:
         return article
 
     url = article_page_url(article_id)
-    await throttle()
-    async with session.get(url, headers=BROWSER_HEADERS) as resp:
-        html = await resp.text()
-        if resp.status >= 400:
-            logger.warning("ricardo article %s HTTP %s", article_id, resp.status)
-            return article
+    html, status, _used = await _fetch_html(
+        pool, url, referer=referer, enrich=True
+    )
+    if status >= 400 or not html:
+        if status:
+            logger.warning("ricardo article %s HTTP %s (all proxies)", article_id, status)
+        return article
 
     detail = parse_article_page_html(html, article_id=article_id)
     if not detail:
@@ -71,10 +140,6 @@ async def _enrich_article(
     merged = dict(article)
     for key, val in detail.items():
         if val is None or val == "":
-            continue
-        if key in ("title",) and merged.get("title") and not article_needs_enrichment(
-            article
-        ):
             continue
         merged[key] = val
     return merged
@@ -85,6 +150,7 @@ async def parse_ricardo_categories(
     *,
     limit: int,
     proxy: str | None = None,
+    proxies: list[str | None] | None = None,
     skip_seller_ids: set[int] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
@@ -92,13 +158,15 @@ async def parse_ricardo_categories(
     if not category_slugs:
         raise ValueError("Нужна хотя бы одна категория")
 
+    proxy_list = _normalize_proxies(proxy, proxies)
     skip = set(skip_seller_ids) if skip_seller_ids else set()
     raw_articles: list[dict[str, Any]] = []
     seen_items: set[str] = set()
     skipped_404: list[str] = []
     enrich = _enrich_enabled()
+    referer = f"{BASE}/{LANG}/"
 
-    async with browse_session(proxy) as (session, _kw):
+    async with proxy_pool(proxy_list) as pool:
         for slug in category_slugs:
             if len(raw_articles) >= limit:
                 break
@@ -107,17 +175,19 @@ async def parse_ricardo_categories(
             empty_streak = 0
             category_failed = False
             while len(raw_articles) < limit and page <= MAX_PAGES_PER_CATEGORY:
-                await throttle()
                 url = category_page_url(slug, page)
-                async with session.get(url, headers=BROWSER_HEADERS) as resp:
-                    html = await resp.text()
-                    if resp.status == 404:
-                        logger.warning("ricardo category 404: %s", url)
-                        skipped_404.append(slug)
-                        category_failed = True
-                        break
-                    if resp.status >= 400:
-                        raise _http_error(resp.status, html, proxy, url=url)
+                html, status, used_proxy = await _fetch_html(
+                    pool, url, referer=referer, enrich=False
+                )
+                referer = url
+
+                if status == 404:
+                    logger.warning("ricardo category 404: %s", url)
+                    skipped_404.append(slug)
+                    category_failed = True
+                    break
+                if status >= 400:
+                    raise _http_error(status, html, used_proxy, url=url)
 
                 articles = extract_articles_from_html(html)
                 if not articles:
@@ -142,6 +212,7 @@ async def parse_ricardo_categories(
                             continue
 
                     seen_items.add(aid)
+                    article["_category_url"] = url
                     raw_articles.append(article)
                     if seller_id is not None:
                         skip.add(seller_id)
@@ -159,12 +230,18 @@ async def parse_ricardo_categories(
                 continue
 
         if enrich:
+            logger.info(
+                "ricardo enrich %s items, proxies=%s",
+                sum(1 for a in raw_articles if article_needs_enrichment(a)),
+                len(pool.proxies),
+            )
             for idx, article in enumerate(raw_articles):
                 if not article_needs_enrichment(article):
                     continue
+                cat_ref = str(article.pop("_category_url", None) or referer)
                 try:
                     raw_articles[idx] = await _enrich_article(
-                        session, article, proxy=proxy
+                        pool, article, referer=cat_ref
                     )
                 except Exception as exc:
                     logger.warning(
