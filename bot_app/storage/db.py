@@ -10,10 +10,15 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_db_path() -> Path:
-    """Путь к SQLite. На Railway — volume /app/data (не стирается при деплое)."""
+    """Путь к SQLite. На Railway — volume (не стирается при деплое)."""
     explicit = os.environ.get("DATABASE_PATH")
     if explicit:
         return Path(explicit)
+
+    mount = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if mount:
+        return Path(mount) / "bot.db"
+
     on_railway = bool(
         os.environ.get("RAILWAY_ENVIRONMENT")
         or os.environ.get("RAILWAY_PROJECT_ID")
