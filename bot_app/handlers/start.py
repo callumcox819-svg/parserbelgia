@@ -4,7 +4,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, CallbackQuery, Message
 
-from bot_app.config import is_admin
+from bot_app.app_config import is_admin
 from bot_app.keyboards import CB_SET_BACK, main_menu_keyboard
 from bot_app.storage import repo
 

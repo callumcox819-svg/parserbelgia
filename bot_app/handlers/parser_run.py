@@ -9,7 +9,7 @@ from pathlib import Path
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, FSInputFile
 
-from bot_app.config import SETTINGS
+from bot_app.app_config import SETTINGS
 from bot_app.keyboards import CB_MAIN_PARSE
 from bot_app.services.parser_runner import run_user_parse
 

@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot_app.config import is_admin
+from bot_app.app_config import is_admin
 from bot_app.keyboards import (
     CB_ADMIN_BACK,
     CB_ADMIN_GRANT,

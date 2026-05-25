@@ -7,7 +7,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot_app.config import ADMIN_IDS, SETTINGS
+from bot_app.app_config import ADMIN_IDS, SETTINGS
 from bot_app.handlers import setup_routers
 from bot_app.handlers.start import setup_bot_commands
 from bot_app.middlewares import AccessMiddleware

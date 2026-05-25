@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
-from bot_app.config import is_admin
+from bot_app.app_config import is_admin
 from bot_app.storage import repo
 
 
