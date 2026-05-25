@@ -23,9 +23,17 @@ def _str_or_none(value: Any) -> str | None:
 def normalize_proxy(proxy: str | None) -> str | None:
     if not proxy:
         return None
-    if not proxy.startswith(("http://", "https://", "socks5://", "socks4://")):
-        return "http://" + proxy
-    return proxy
+    p = proxy.strip()
+    lower = p.lower()
+    if lower.startswith(
+        ("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")
+    ):
+        return p
+    if lower.startswith("socks5:"):
+        return "socks5://" + p[7:].lstrip("/")
+    if lower.startswith("socks4:"):
+        return "socks4://" + p[7:].lstrip("/")
+    return "http://" + p
 
 
 def load_settings() -> dict[str, Any]:

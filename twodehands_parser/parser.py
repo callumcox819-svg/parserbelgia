@@ -15,7 +15,7 @@ from .url_builder import (
     extract_l1_category_id,
     normalize_browser_url,
 )
-from .http_client import API_HEADERS, DEFAULT_HEADERS, search_session, warmup_session
+from .http_client import API_HEADERS, search_session
 from .void_format import listing_to_void_item
 
 logger = logging.getLogger(__name__)
@@ -104,12 +104,6 @@ async def parse_2dehands(
     browser_url = normalize_browser_url(source_url)
     base_params = build_api_params_from_browser_url(browser_url)
 
-    timeout = aiohttp.ClientTimeout(total=60)
-    connector = aiohttp.TCPConnector(ssl=True)
-    session_kwargs: dict[str, Any] = {"timeout": timeout, "connector": connector}
-    if proxy:
-        session_kwargs["trust_env"] = True
-
     items: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     offset = int(base_params.get("offset", 0) or 0)
@@ -117,14 +111,9 @@ async def parse_2dehands(
     search_request: dict[str, Any] | None = None
     use_post_body = False
 
-    request_kwargs: dict[str, Any] = {}
-    if proxy:
-        request_kwargs["proxy"] = proxy
-
-    async with aiohttp.ClientSession(**session_kwargs) as session:
-        await warmup_session(session, proxy)
+    async with search_session(proxy) as (session, req_kw):
         base_params = await _resolve_category_id(
-            session, base_params, request_kwargs=request_kwargs
+            session, base_params, request_kwargs=req_kw
         )
 
         while len(items) < limit:
@@ -142,7 +131,7 @@ async def parse_2dehands(
                     API_SEARCH,
                     json=req_copy,
                     headers={**API_HEADERS, "Content-Type": "application/json"},
-                    **request_kwargs,
+                    **req_kw,
                 ) as resp:
                     raw = await resp.text()
                     if resp.status == 204 or not raw.strip():
@@ -155,7 +144,7 @@ async def parse_2dehands(
                     base_params, limit=page_limit, offset=offset
                 )
                 data = await _fetch_search_page(
-                    session, api_url, request_kwargs=request_kwargs
+                    session, api_url, request_kwargs=req_kw
                 )
 
             listings = data.get("listings") or []

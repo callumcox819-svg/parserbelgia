@@ -8,5 +8,6 @@ ADMIN_IDS = "123456789"
 
 DEFAULT_LIMIT = 50
 
-PROXY = "http://user:password@host:10789"
+PROXY = "socks5://user:password@host:1080"
+# PROXY = "http://user:password@host:10789"
 # PROXY = None

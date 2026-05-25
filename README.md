@@ -22,7 +22,7 @@ copy config.example.py config.py
 | Variable | Значение |
 |----------|----------|
 | `BOT_TOKEN` | токен от @BotFather |
-| `PROXY` | `http://user:pass@109.104.153.100:10789` |
+| `PROXY` | `socks5://user:pass@host:1080` или `http://...` |
 | `DEFAULT_LIMIT` | `50` (опционально) |
 
 Сохранить → **Redeploy**.

@@ -41,17 +41,23 @@ API_HEADERS = {
     "sec-fetch-site": "same-origin",
 }
 
-# Backward compatibility
 DEFAULT_HEADERS = API_HEADERS
 
+def create_connector(proxy: str | None) -> aiohttp.BaseConnector:
+    if not proxy:
+        return aiohttp.TCPConnector(ssl=True, limit=20)
+    from aiohttp_socks import ProxyConnector
 
-def proxy_kwargs(proxy: str | None) -> dict[str, Any]:
-    return {"proxy": proxy} if proxy else {}
+    return ProxyConnector.from_url(proxy, rdns=True)
+
+
+def request_kwargs(proxy: str | None) -> dict[str, Any]:
+    """Прокси задаётся через connector (HTTP и SOCKS5)."""
+    return {}
 
 
 async def warmup_session(session: aiohttp.ClientSession, proxy: str | None) -> None:
-    """Загрузка главной страницы — cookies для lrp/api/search."""
-    kw = proxy_kwargs(proxy)
+    kw = request_kwargs(proxy)
     async with session.get(
         f"{BASE}/",
         headers=BROWSER_HEADERS,
@@ -71,7 +77,7 @@ async def search_session(
     proxy: str | None,
 ) -> AsyncIterator[tuple[aiohttp.ClientSession, dict[str, Any]]]:
     timeout = aiohttp.ClientTimeout(total=90)
-    connector = aiohttp.TCPConnector(ssl=True, limit=20)
+    connector = create_connector(proxy)
     jar = aiohttp.CookieJar(unsafe=True)
     async with aiohttp.ClientSession(
         timeout=timeout,
@@ -79,4 +85,4 @@ async def search_session(
         cookie_jar=jar,
     ) as session:
         await warmup_session(session, proxy)
-        yield session, proxy_kwargs(proxy)
+        yield session, request_kwargs(proxy)
