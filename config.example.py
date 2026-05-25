@@ -3,6 +3,9 @@
 
 BOT_TOKEN = "your_token_from_botfather"
 
+# Ваш Telegram user id (узнать: @userinfobot), можно несколько через запятую
+ADMIN_IDS = "123456789"
+
 DEFAULT_LIMIT = 50
 
 PROXY = "http://user:password@host:10789"

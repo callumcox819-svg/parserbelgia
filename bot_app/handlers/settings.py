@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+
+from bot_app.keyboards import (
+    CB_CAT_TOGGLE,
+    CB_SET_BACK,
+    CB_SET_CATEGORIES,
+    CB_SET_LIMIT,
+    CB_SET_PROXY,
+    cancel_keyboard,
+    categories_keyboard,
+    main_menu_keyboard,
+    settings_menu_keyboard,
+)
+from bot_app.states import SettingsForm
+from bot_app.storage import repo
+from settings import normalize_proxy
+
+router = Router(name="settings")
+
+
+async def _settings_summary(user_id: int) -> str:
+    s = await repo.get_user_settings(user_id)
+    keys = await repo.get_enabled_category_keys(user_id)
+    proxy = s.get("proxy") or "не задан (глобальный с сервера)"
+    return (
+        "⚙️ **Настройки**\n\n"
+        f"🔢 Лимит JSON: **{s['json_limit']}**\n"
+        f"📂 Категорий включено: **{len(keys)}**\n"
+        f"🌐 Прокси: `{proxy}`"
+    )
+
+
+@router.callback_query(F.data == "main:settings")
+async def open_settings(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await callback.message.edit_text(
+        await _settings_summary(uid),
+        reply_markup=settings_menu_keyboard(),
+        parse_mode="Markdown",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == CB_SET_CATEGORIES)
+async def open_categories(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    states = await repo.get_category_states(uid)
+    await callback.message.edit_text(
+        "📂 Выберите категории (нажмите для вкл/выкл):",
+        reply_markup=categories_keyboard(states),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(CB_CAT_TOGGLE))
+async def toggle_category(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    key = callback.data.removeprefix(CB_CAT_TOGGLE)
+    await repo.toggle_category(uid, key)
+    states = await repo.get_category_states(uid)
+    await callback.message.edit_reply_markup(reply_markup=categories_keyboard(states))
+    await callback.answer()
+
+
+@router.callback_query(F.data == CB_SET_LIMIT)
+async def ask_limit(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SettingsForm.waiting_json_limit)
+    await callback.message.answer(
+        "🔢 Введите число объявлений для JSON (1–500).\n"
+        "Если объявлений меньше — получите сколько найдено.",
+        reply_markup=cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(SettingsForm.waiting_json_limit, F.text)
+async def save_limit(message: Message, state: FSMContext, is_admin_user: bool) -> None:
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer(
+            "Отменено.",
+            reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+        )
+        return
+    try:
+        n = int((message.text or "").strip())
+        if not 1 <= n <= 500:
+            raise ValueError
+    except ValueError:
+        await message.answer("Введите целое число от 1 до 500.")
+        return
+    await repo.set_json_limit(message.from_user.id, n)
+    await state.clear()
+    await message.answer(
+        f"✅ Лимит сохранён: {n}",
+        reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+    )
+
+
+@router.callback_query(F.data == CB_SET_PROXY)
+async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SettingsForm.waiting_proxy)
+    await callback.message.answer(
+        "🌐 Отправьте прокси в формате:\n"
+        "`http://user:pass@host:port`\n\n"
+        "Или `0` / `off` чтобы сбросить.",
+        parse_mode="Markdown",
+        reply_markup=cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(SettingsForm.waiting_proxy, F.text)
+async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -> None:
+    text = (message.text or "").strip()
+    if text == "❌ Отмена":
+        await state.clear()
+        await message.answer(
+            "Отменено.",
+            reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+        )
+        return
+    if text.lower() in ("0", "off", "нет", "none", "-"):
+        await repo.set_proxy(message.from_user.id, None)
+        await state.clear()
+        await message.answer(
+            "✅ Прокси сброшен.",
+            reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+        )
+        return
+    proxy = normalize_proxy(text)
+    if not proxy:
+        await message.answer("Некорректный прокси.")
+        return
+    await repo.set_proxy(message.from_user.id, proxy)
+    await state.clear()
+    await message.answer(
+        "✅ Прокси сохранён.",
+        reply_markup=main_menu_keyboard(is_admin=is_admin_user),
+    )

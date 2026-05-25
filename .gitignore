@@ -9,3 +9,4 @@ venv/
 *.log
 output/
 results/
+data/

@@ -58,8 +58,13 @@ def load_settings() -> dict[str, Any]:
         _from_config("PROXY", config_mod)
     )
 
+    admin_ids = _str_or_none(os.environ.get("ADMIN_IDS")) or _str_or_none(
+        os.environ.get("ADMIN_ID")
+    ) or _str_or_none(_from_config("ADMIN_IDS", config_mod))
+
     return {
         "bot_token": bot_token,
         "default_limit": default_limit,
         "proxy": normalize_proxy(proxy),
+        "admin_ids": admin_ids,
     }
