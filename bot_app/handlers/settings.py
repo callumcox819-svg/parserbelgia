@@ -105,9 +105,9 @@ async def save_limit(message: Message, state: FSMContext, is_admin_user: bool) -
 async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SettingsForm.waiting_proxy)
     await callback.message.answer(
-        "🌐 Отправьте прокси в формате:\n"
-        "`http://user:pass@host:port`\n\n"
-        "Или `0` / `off` чтобы сбросить.",
+        "🌐 Прокси (желательно BE/EU residential):\n"
+        "`http://login:password@host:port`\n\n"
+        "Без `http://` тоже примет. Сброс: `0` или `off`.",
         parse_mode="Markdown",
         reply_markup=cancel_keyboard(),
     )

@@ -15,20 +15,10 @@ from .url_builder import (
     extract_l1_category_id,
     normalize_browser_url,
 )
+from .http_client import API_HEADERS, DEFAULT_HEADERS, search_session, warmup_session
 from .void_format import listing_to_void_item
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "nl-BE,nl;q=0.9,en;q=0.8",
-    "Referer": f"{BASE}/",
-}
 
 
 async def _fetch_text(
@@ -39,7 +29,7 @@ async def _fetch_text(
     request_kwargs: dict[str, Any] | None = None,
 ) -> str:
     kw = request_kwargs or {}
-    async with session.get(url, headers=DEFAULT_HEADERS, **kw) as resp:
+    async with session.get(url, headers=API_HEADERS, **kw) as resp:
         body = await resp.text()
         if resp.status == 204:
             return ""
@@ -132,6 +122,7 @@ async def parse_2dehands(
         request_kwargs["proxy"] = proxy
 
     async with aiohttp.ClientSession(**session_kwargs) as session:
+        await warmup_session(session, proxy)
         base_params = await _resolve_category_id(
             session, base_params, request_kwargs=request_kwargs
         )
@@ -150,7 +141,7 @@ async def parse_2dehands(
                 async with session.post(
                     API_SEARCH,
                     json=req_copy,
-                    headers={**DEFAULT_HEADERS, "Content-Type": "application/json"},
+                    headers={**API_HEADERS, "Content-Type": "application/json"},
                     **request_kwargs,
                 ) as resp:
                     raw = await resp.text()

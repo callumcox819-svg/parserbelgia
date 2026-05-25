@@ -3,11 +3,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import aiohttp
-
-from .parser import DEFAULT_HEADERS, _fetch_search_page, _search_request_from_response
+from .http_client import API_HEADERS, search_session
+from .parser import _fetch_search_page, _search_request_from_response
 from .url_builder import API_SEARCH, api_url_from_params
 from .void_format import listing_to_void_item
+
+
+def _http_error(status: int, raw: str, proxy: str | None) -> RuntimeError:
+    if status == 403:
+        msg = (
+            "HTTP 403 Forbidden — 2dehands отклонил запрос. "
+            "Проверьте BE/EU прокси в настройках (формат http://user:pass@host:port)."
+        )
+        if proxy:
+            msg += " Сейчас используется ваш прокси."
+        return RuntimeError(msg)
+    return RuntimeError(f"HTTP {status}: {raw[:300]}")
 
 
 async def parse_l1_categories(
@@ -17,10 +28,6 @@ async def parse_l1_categories(
     proxy: str | None = None,
     skip_seller_ids: set[int] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """
-    Собирает объявления по списку l1CategoryId.
-    Останавливается при достижении limit или когда объявления кончились.
-    """
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
     if not category_ids:
@@ -30,12 +37,7 @@ async def parse_l1_categories(
     items: list[dict[str, Any]] = []
     seen_items: set[str] = set()
 
-    timeout = aiohttp.ClientTimeout(total=90)
-    request_kwargs: dict[str, Any] = {}
-    if proxy:
-        request_kwargs["proxy"] = proxy
-
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with search_session(proxy) as (session, request_kwargs):
         for cat_id in category_ids:
             if len(items) >= limit:
                 break
@@ -63,7 +65,7 @@ async def parse_l1_categories(
                         API_SEARCH,
                         json=req_copy,
                         headers={
-                            **DEFAULT_HEADERS,
+                            **API_HEADERS,
                             "Content-Type": "application/json",
                         },
                         **request_kwargs,
@@ -72,7 +74,7 @@ async def parse_l1_categories(
                         if resp.status == 204 or not raw.strip():
                             break
                         if resp.status >= 400:
-                            raise RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
+                            raise _http_error(resp.status, raw, proxy)
                         data = json.loads(raw)
                 else:
                     api_url = api_url_from_params(
