@@ -13,19 +13,21 @@ copy config.example.py config.py
 
 В `config.py` укажите `BOT_TOKEN` от [@BotFather](https://t.me/BotFather).
 
-### Railway / Docker
+### Railway (обязательно)
 
-Переменные окружения (приоритетнее `config.py`):
+`config.py` в `.gitignore` — **Railway его не кладёт в контейнер**, даже если файл виден на GitHub.
 
-| Variable | Пример |
-|----------|--------|
-| `BOT_TOKEN` | `123456:ABC...` |
-| `PROXY` | `http://user:pass@host:10789` |
-| `DEFAULT_LIMIT` | `50` |
+В проекте Railway → **Variables**:
 
-**Важно:** `PROXY` и `BOT_TOKEN` — только строки в кавычках в `config.py` или как env на Railway.  
-Неверно: `PROXY = user:pass@host:port` → `SyntaxError`  
-Верно: `PROXY = "http://user:pass@host:port"`
+| Variable | Значение |
+|----------|----------|
+| `BOT_TOKEN` | токен от @BotFather |
+| `PROXY` | `http://user:pass@109.104.153.100:10789` |
+| `DEFAULT_LIMIT` | `50` (опционально) |
+
+Сохранить → **Redeploy**.
+
+Токен в открытом `config.py` на GitHub = скомпрометирован → `/revoke` в BotFather и новый токен только в Variables.
 
 ## CLI
 

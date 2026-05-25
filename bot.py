@@ -104,7 +104,8 @@ async def main() -> None:
     token = SETTINGS["bot_token"] or ""
     if not token:
         raise SystemExit(
-            "Укажите BOT_TOKEN в config.py или переменной окружения BOT_TOKEN."
+            "BOT_TOKEN not set. On Railway: Project -> Variables -> BOT_TOKEN=...\n"
+            "config.py from GitHub is NOT deployed (listed in .gitignore)."
         )
 
     bot = Bot(token=token)

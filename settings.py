@@ -29,13 +29,19 @@ def normalize_proxy(proxy: str | None) -> str | None:
 
 
 def load_settings() -> dict[str, Any]:
+    config_mod: ModuleType | None = None
     try:
         import config as config_mod
     except ImportError:
+        pass
+    except Exception:
+        # Broken config.py must not block env-based startup (Railway).
         config_mod = None
 
-    bot_token = _str_or_none(os.environ.get("BOT_TOKEN")) or _str_or_none(
-        _from_config("BOT_TOKEN", config_mod)
+    bot_token = (
+        _str_or_none(os.environ.get("BOT_TOKEN"))
+        or _str_or_none(os.environ.get("TELEGRAM_BOT_TOKEN"))
+        or _str_or_none(_from_config("BOT_TOKEN", config_mod))
     )
 
     limit_raw = os.environ.get("DEFAULT_LIMIT") or _from_config(
