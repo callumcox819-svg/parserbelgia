@@ -9,6 +9,7 @@ from .html_parse import article_needs_enrichment, extract_articles_from_html
 from .http_client import (
     BASE,
     LANG,
+    category_delay_sec,
     category_page_url,
     is_blocked_response,
     navigation_headers,
@@ -25,9 +26,20 @@ MAX_PAGES_PER_CATEGORY = 30
 PAGE_SIZE_HINT = 48
 
 
+def _enrich_max() -> int:
+    """0 = быстрый режим как void (только категории). N = макс. карточек /de/a/."""
+    raw = os.environ.get("RICARDO_ENRICH_MAX", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
 def _enrich_enabled() -> bool:
     raw = os.environ.get("RICARDO_ENRICH_DETAILS", "1").strip().lower()
-    return raw not in ("0", "false", "no", "off")
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return _enrich_max() > 0
 
 
 def _normalize_proxies(
@@ -164,7 +176,17 @@ async def parse_ricardo_categories(
     seen_items: set[str] = set()
     skipped_404: list[str] = []
     enrich = _enrich_enabled()
+    enrich_cap = _enrich_max()
+    pages_fetched = 0
+    enrich_calls = 0
     referer = f"{BASE}/{LANG}/"
+
+    if not enrich:
+        logger.info(
+            "ricardo fast mode: category pages only (~%.1fs), enrich off (VOID-like). "
+            "Set RICARDO_ENRICH_MAX=50 for full card scrape.",
+            category_delay_sec(),
+        )
 
     async with proxy_pool(proxy_list) as pool:
         for slug in category_slugs:
@@ -188,6 +210,7 @@ async def parse_ricardo_categories(
                     break
                 if status >= 400:
                     raise _http_error(status, html, used_proxy, url=url)
+                pages_fetched += 1
 
                 articles = extract_articles_from_html(html)
                 if not articles:
@@ -230,14 +253,19 @@ async def parse_ricardo_categories(
                 continue
 
         if enrich:
+            need = sum(1 for a in raw_articles if article_needs_enrichment(a))
             logger.info(
-                "ricardo enrich %s items, proxies=%s",
-                sum(1 for a in raw_articles if article_needs_enrichment(a)),
+                "ricardo enrich up to %s/%s stubs, proxies=%s",
+                min(enrich_cap, need),
+                need,
                 len(pool.proxies),
             )
             for idx, article in enumerate(raw_articles):
+                if enrich_calls >= enrich_cap:
+                    break
                 if not article_needs_enrichment(article):
                     continue
+                enrich_calls += 1
                 cat_ref = str(article.pop("_category_url", None) or referer)
                 try:
                     raw_articles[idx] = await _enrich_article(
@@ -249,6 +277,9 @@ async def parse_ricardo_categories(
                         article.get("id"),
                         exc,
                     )
+        else:
+            for article in raw_articles:
+                article.pop("_category_url", None)
 
     if not raw_articles and skipped_404 and len(skipped_404) == len(category_slugs):
         raise RuntimeError(
@@ -268,5 +299,8 @@ async def parse_ricardo_categories(
             "total": len(items),
             "enriched": enriched,
             "proxies": len(proxy_list),
+            "pages": pages_fetched,
+            "enrich_calls": enrich_calls,
+            "fast_mode": not enrich,
         },
     }

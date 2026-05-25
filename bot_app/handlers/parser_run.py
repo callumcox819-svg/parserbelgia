@@ -69,15 +69,25 @@ async def run_parser(callback: CallbackQuery) -> None:
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)
             proxies_n = int(stats.get("proxies") or 0)
+            pages = int(stats.get("pages") or 0)
+            enrich_calls = int(stats.get("enrich_calls") or 0)
+            fast = stats.get("fast_mode")
             extra = (
-                f"\n📸 С фото/ценой: **{enriched}** из {count}\n"
-                f"🌐 Прокси в пуле: **{proxies_n}**"
+                f"\n📄 Страниц категорий: **{pages}**\n"
+                f"📸 С фото/ценой: **{enriched}** из {count}\n"
+                f"🌐 Прокси: **{proxies_n}**"
             )
-            if enriched < count * 0.3:
+            if fast:
                 extra += (
-                    "\n\n⚠️ Много **403 Cloudflare** — Ricardo режет карточки. "
-                    "В логах смотрите `host#session` (разные session = разные прокси). "
-                    "Нужен residential **CH** или меньше лимит (10–20)."
+                    "\n⚡ Режим **void** (без /de/a/, быстро). "
+                    "Полные карточки: Railway `RICARDO_ENRICH_MAX=50`."
+                )
+            elif enrich_calls:
+                extra += f"\n🔍 Открыто карточек: **{enrich_calls}**"
+            if enriched < count * 0.3 and enrich_calls > 0:
+                extra += (
+                    "\n\n⚠️ **403 Cloudflare** на карточках — поставьте "
+                    "`RICARDO_ENRICH_MAX=0` (только категории, как void)."
                 )
         await status.edit_text(
             f"✅ Готово ({plat_label}): **{count}** объявлений (лимит {limit}).{extra}",

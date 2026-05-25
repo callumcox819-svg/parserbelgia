@@ -46,20 +46,22 @@ def create_connector(proxy: str | None) -> aiohttp.BaseConnector:
     return ProxyConnector.from_url(proxy, rdns=True)
 
 
-def request_delay_sec() -> float:
-    raw = os.environ.get("RICARDO_REQUEST_DELAY", "3.5")
+def _delay_env(name: str, fallback: str) -> float:
+    raw = os.environ.get(name) or os.environ.get("RICARDO_REQUEST_DELAY") or fallback
     try:
-        return max(1.0, float(raw))
+        return max(0.8, float(raw))
     except ValueError:
-        return 3.5
+        return float(fallback)
 
 
-def enrich_delay_mult() -> float:
-    raw = os.environ.get("RICARDO_ENRICH_DELAY_MULT", "1.5")
-    try:
-        return max(1.0, float(raw))
-    except ValueError:
-        return 1.5
+def category_delay_sec() -> float:
+    """Пауза между страницами категорий (как у void — только листание)."""
+    return _delay_env("RICARDO_CATEGORY_DELAY", "1.5")
+
+
+def enrich_delay_sec() -> float:
+    """Пауза при открытии /de/a/{id}/ (медленно, Cloudflare)."""
+    return _delay_env("RICARDO_ENRICH_DELAY", "2.5")
 
 
 def blocked_cooldown_sec() -> float:
@@ -71,10 +73,9 @@ def blocked_cooldown_sec() -> float:
 
 
 async def throttle(*, enrich: bool = False) -> None:
-    base = request_delay_sec()
-    if enrich:
-        base *= enrich_delay_mult()
-    await asyncio.sleep(base + random.uniform(0.3, 1.2))
+    base = enrich_delay_sec() if enrich else category_delay_sec()
+    jitter = random.uniform(0.15, 0.6) if not enrich else random.uniform(0.3, 1.0)
+    await asyncio.sleep(base + jitter)
 
 
 async def throttle_after_block() -> None:

@@ -42,7 +42,7 @@ async def _settings_summary(user_id: int) -> str:
     delay_hint = (
         "~0.8 с между запросами"
         if platform == "2dehands"
-        else "~3.5 с + ротация прокси (антифрод Cloudflare)"
+        else "~1.5 с категории (как void), карточки — опционально"
     )
     return (
         "⚙️ **Настройки**\n\n"

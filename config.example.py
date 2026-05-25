@@ -15,3 +15,8 @@ PROXY = "socks5://user:password@host:1080"
 # Ricardo: несколько CH-прокси (по одному на строку в Railway Variables)
 # PROXIES = """socks5://user:pass@ch1:1080
 # socks5://user:pass@ch2:1080"""
+
+# Ricardo скорость (как void-parser — только листание категорий):
+# RICARDO_CATEGORY_DELAY=1.5
+# RICARDO_ENRICH_MAX=0
+# Полные данные продавца (медленно, риск 403): RICARDO_ENRICH_MAX=50
