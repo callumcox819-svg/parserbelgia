@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.json
+!package.json
+.env
+config.py
+venv/
+.venv/
+*.log
+output/
+results/
