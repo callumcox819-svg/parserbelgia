@@ -200,10 +200,25 @@ def _pick_best_listing_batch(arrays: list[list[dict[str, Any]]]) -> list[dict[st
     return best
 
 
+def _walk_listing_cards(node: Any, out: list[dict[str, Any]], depth: int = 0) -> None:
+    if depth > 14:
+        return
+    if isinstance(node, dict):
+        if _looks_like_listing_card(node):
+            norm = _normalize_article(node)
+            if norm:
+                out.append(norm)
+        for val in node.values():
+            _walk_listing_cards(val, out, depth + 1)
+    elif isinstance(node, list):
+        for item in node:
+            _walk_listing_cards(item, out, depth + 1)
+
+
 def _extract_from_next_data(data: dict[str, Any]) -> list[dict[str, Any]]:
     page_props = data.get("props", {}).get("pageProps", {})
     if not isinstance(page_props, dict):
-        return []
+        page_props = {}
 
     articles: list[dict[str, Any]] = []
     for key in _LISTING_ARRAY_KEYS:
@@ -232,6 +247,9 @@ def _extract_from_next_data(data: dict[str, Any]) -> list[dict[str, Any]]:
             norm = _normalize_article(item)
             if norm:
                 articles.append(norm)
+
+    if not articles:
+        _walk_listing_cards(data, articles)
 
     return articles
 
@@ -292,17 +310,29 @@ def article_needs_enrichment(article: dict[str, Any]) -> bool:
     return False
 
 
-def extract_articles_from_html(html: str) -> list[dict[str, Any]]:
+def extract_articles_from_html(html: str) -> tuple[list[dict[str, Any]], str]:
     articles: list[dict[str, Any]] = []
+    source = "links"
     match = _NEXT_DATA_RE.search(html)
     if match:
         try:
             data = json.loads(match.group(1))
             articles = _extract_from_next_data(data)
+            if articles:
+                with_photo = sum(1 for a in articles if a.get("image"))
+                with_price = sum(
+                    1
+                    for a in articles
+                    if a.get("buy_now_price") is not None or a.get("bid_price")
+                )
+                source = "next_data"
+                if with_photo or with_price:
+                    source = "next_data_rich"
         except json.JSONDecodeError:
             pass
 
     if not articles:
         articles = _articles_from_links(html)
+        source = "links"
 
-    return _dedupe_articles(articles)
+    return _dedupe_articles(articles), source

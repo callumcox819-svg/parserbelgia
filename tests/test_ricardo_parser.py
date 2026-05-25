@@ -25,10 +25,11 @@ class RicardoParserTest(unittest.TestCase):
             + json.dumps(payload)
             + "</script>"
         )
-        arts = extract_articles_from_html(html)
+        arts, src = extract_articles_from_html(html)
         self.assertEqual(len(arts), 1)
         self.assertEqual(arts[0]["buy_now_price"], 500)
         self.assertIn("t_1000x750", arts[0]["image"])
+        self.assertIn("next_data", src)
 
     def test_article_page_detail(self) -> None:
         article = {
@@ -69,8 +70,9 @@ class RicardoParserTest(unittest.TestCase):
 
     def test_link_stub_needs_enrichment(self) -> None:
         html = '<a href="/de/a/foo-bar-1319274576/">x</a>'
-        arts = extract_articles_from_html(html)
+        arts, src = extract_articles_from_html(html)
         self.assertEqual(arts[0]["id"], "1319274576")
+        self.assertEqual(src, "links")
         self.assertTrue(article_needs_enrichment(arts[0]))
 
 

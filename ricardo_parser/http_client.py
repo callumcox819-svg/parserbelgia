@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
 from contextlib import asynccontextmanager
@@ -8,6 +9,8 @@ from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 BASE = "https://www.ricardo.ch"
 LANG = "de"
@@ -64,12 +67,25 @@ def enrich_delay_sec() -> float:
     return _delay_env("RICARDO_ENRICH_DELAY", "2.5")
 
 
-def blocked_cooldown_sec() -> float:
-    raw = os.environ.get("RICARDO_403_COOLDOWN", "90")
+def blocked_cooldown_sec(*, enrich: bool = False) -> float:
+    if not enrich:
+        raw = os.environ.get("RICARDO_403_COOLDOWN_CATEGORY", "15")
+    else:
+        raw = os.environ.get("RICARDO_403_COOLDOWN", "90")
     try:
-        return max(30.0, float(raw))
+        return max(5.0, float(raw))
     except ValueError:
-        return 90.0
+        return 15.0 if not enrich else 90.0
+
+
+def proxy_retry_max(*, enrich: bool = False) -> int:
+    raw = os.environ.get(
+        "RICARDO_PROXY_RETRY_MAX", "3" if not enrich else "10"
+    )
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
 
 
 async def throttle(*, enrich: bool = False) -> None:
@@ -131,8 +147,33 @@ async def _ensure_ch_proxy(session: aiohttp.ClientSession) -> dict[str, Any]:
     return geo
 
 
+def _strict_geo() -> bool:
+    return os.environ.get("RICARDO_STRICT_GEO", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _skip_homepage_warmup() -> bool:
+    return os.environ.get("RICARDO_SKIP_WARMUP", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
 async def warmup_session(session: aiohttp.ClientSession) -> None:
-    await _ensure_ch_proxy(session)
+    try:
+        await _ensure_ch_proxy(session)
+    except RuntimeError as exc:
+        if _strict_geo():
+            raise
+        logger.warning("ricardo geo (non-strict): %s", exc)
+
+    if _skip_homepage_warmup():
+        return
+
     headers = navigation_headers(f"{BASE}/{LANG}/", same_origin=False)
     async with session.get(f"{BASE}/{LANG}/", headers=headers) as resp:
         body = await resp.text()

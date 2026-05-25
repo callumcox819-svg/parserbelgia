@@ -77,10 +77,17 @@ async def run_parser(callback: CallbackQuery) -> None:
                 f"📸 С фото/ценой: **{enriched}** из {count}\n"
                 f"🌐 Прокси: **{proxies_n}**"
             )
-            if fast:
+            src = stats.get("data_source") or ""
+            if src == "links":
                 extra += (
-                    "\n⚡ Режим **void** (без /de/a/, быстро). "
-                    "Полные карточки: Railway `RICARDO_ENRICH_MAX=50`."
+                    "\n\n⚠️ Ricardo отдал только **ссылки** (без JSON на странице). "
+                    "Фото/цена пустые — Cloudflare или прокси не CH. "
+                    "Проверьте exit IP в LomaProxy."
+                )
+            elif fast:
+                extra += (
+                    "\n⚡ Режим **void** (без /de/a/). "
+                    "Полные карточки: `RICARDO_ENRICH_MAX=20`."
                 )
             elif enrich_calls:
                 extra += f"\n🔍 Открыто карточек: **{enrich_calls}**"

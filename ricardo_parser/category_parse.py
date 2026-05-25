@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -9,13 +10,14 @@ from .html_parse import article_needs_enrichment, extract_articles_from_html
 from .http_client import (
     BASE,
     LANG,
+    blocked_cooldown_sec,
     category_delay_sec,
     category_page_url,
     is_blocked_response,
     navigation_headers,
     proxy_label,
+    proxy_retry_max,
     throttle,
-    throttle_after_block,
 )
 from .proxy_pool import RicardoProxyPool, proxy_pool
 from .void_format import article_to_void_item
@@ -90,7 +92,8 @@ async def _fetch_html(
 ) -> tuple[str, int, str | None]:
     """GET с ротацией прокси при 403/429."""
     last_status = 0
-    for proxy in pool.proxies_for_retry():
+    attempts = pool.proxies_for_retry(max_attempts=proxy_retry_max(enrich=enrich))
+    for proxy in attempts:
         await throttle(enrich=enrich)
         try:
             session = await pool.get_session(proxy)
@@ -109,8 +112,10 @@ async def _fetch_html(
                         resp.status,
                         proxy_label(proxy),
                     )
-                    pool.mark_blocked(proxy)
-                    await throttle_after_block()
+                    pool.mark_blocked(
+                        proxy, seconds=blocked_cooldown_sec(enrich=enrich)
+                    )
+                    await asyncio.sleep(2.0)
                     continue
                 if resp.status >= 400:
                     return html, resp.status, proxy
@@ -122,7 +127,8 @@ async def _fetch_html(
                 proxy_label(proxy),
                 exc,
             )
-            pool.mark_blocked(proxy, seconds=60)
+            pool.mark_blocked(proxy, seconds=blocked_cooldown_sec(enrich=enrich))
+            await asyncio.sleep(1.5)
     return "", last_status, None
 
 
@@ -179,6 +185,7 @@ async def parse_ricardo_categories(
     enrich_cap = _enrich_max()
     pages_fetched = 0
     enrich_calls = 0
+    data_source = "unknown"
     referer = f"{BASE}/{LANG}/"
 
     if not enrich:
@@ -212,7 +219,11 @@ async def parse_ricardo_categories(
                     raise _http_error(status, html, used_proxy, url=url)
                 pages_fetched += 1
 
-                articles = extract_articles_from_html(html)
+                articles, src = extract_articles_from_html(html)
+                if src != "links":
+                    data_source = src
+                elif data_source == "unknown":
+                    data_source = src
                 if not articles:
                     empty_streak += 1
                     if empty_streak >= 2:
@@ -302,5 +313,6 @@ async def parse_ricardo_categories(
             "pages": pages_fetched,
             "enrich_calls": enrich_calls,
             "fast_mode": not enrich,
+            "data_source": data_source,
         },
     }

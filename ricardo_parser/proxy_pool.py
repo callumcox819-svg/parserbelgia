@@ -47,7 +47,7 @@ class RicardoProxyPool:
         until = self._cooldown_until.get(key, 0.0)
         return time.monotonic() >= until
 
-    def mark_blocked(self, proxy: str | None, *, seconds: float = 120.0) -> None:
+    def mark_blocked(self, proxy: str | None, *, seconds: float = 15.0) -> None:
         key = self._key(proxy)
         self._cooldown_until[key] = time.monotonic() + seconds
         logger.info(
