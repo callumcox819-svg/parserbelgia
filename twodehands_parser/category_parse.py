@@ -8,7 +8,7 @@ from typing import Any
 from .http_client import search_session
 from .parser import _fetch_search_page
 from .url_builder import api_url_from_params
-from .filters import listing_is_auction
+from .filters import listing_is_auction, void_item_is_auction_price
 from .void_format import listing_to_void_item
 
 # POST /lrp/api/search часто даёт 403; пагинация только через GET.
@@ -109,7 +109,15 @@ async def parse_l1_categories(
 
                     if item_id:
                         seen_items.add(item_id)
-                    items.append(listing_to_void_item(listing))
+                    void_item = listing_to_void_item(listing)
+                    if skip_auction_listings and void_item_is_auction_price(
+                        str(void_item.get("item_price") or "")
+                    ):
+                        skipped_auctions += 1
+                        if item_id:
+                            seen_items.discard(item_id)
+                        continue
+                    items.append(void_item)
                     if seller_id:
                         skip.add(int(seller_id))
 

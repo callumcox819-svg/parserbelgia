@@ -131,17 +131,18 @@ def categories_keyboard(states: dict[str, bool], platform: str) -> InlineKeyboar
             InlineKeyboardButton(text="⬜ Снять все", callback_data=CB_CAT_ALL_OFF),
         ],
     ]
+    cat_buttons: list[InlineKeyboardButton] = []
     for cat in categories_for_platform(platform):
         on = states.get(cat.key, False)
         mark = "✅" if on else "⬜"
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{mark} {cat.title}",
-                    callback_data=f"{CB_CAT_TOGGLE}{cat.key}",
-                )
-            ]
+        cat_buttons.append(
+            InlineKeyboardButton(
+                text=f"{mark} {cat.title}",
+                callback_data=f"{CB_CAT_TOGGLE}{cat.key}",
+            )
         )
+    for i in range(0, len(cat_buttons), 2):
+        rows.append(cat_buttons[i : i + 2])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

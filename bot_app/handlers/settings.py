@@ -195,7 +195,7 @@ async def open_filters(callback: CallbackQuery) -> None:
         "**Без ставок (Bieden)** — пропускать аукционы "
         "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
         "**Без авто / броммеров** — не парсить категории:\n"
-        "🚗 Auto's, 🔧 Auto-onderdelen, 🚲 Fietsen en Brommers.\n\n"
+        "🚗 Авто, 🔧 Автозапчасти, 🚲 Вело и мопеды.\n\n"
         "Вкл/выкл кнопками ниже."
     )
     if platform != "2dehands":
