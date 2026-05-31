@@ -63,7 +63,8 @@ async def get_user_settings(user_id: int) -> dict[str, Any]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             """
-            SELECT platform, json_limit, proxy, parse_count
+            SELECT platform, json_limit, proxy, parse_count,
+                   filter_skip_bids, filter_skip_vehicles
             FROM users WHERE user_id = ?
             """,
             (user_id,),
@@ -75,13 +76,47 @@ async def get_user_settings(user_id: int) -> dict[str, Any]:
             "json_limit": 50,
             "proxy": None,
             "parse_count": 0,
+            "filter_skip_bids": True,
+            "filter_skip_vehicles": True,
         }
     return {
         "platform": normalize_platform(row[0]),
         "json_limit": row[1],
         "proxy": row[2],
         "parse_count": row[3],
+        "filter_skip_bids": bool(row[4]) if len(row) > 4 else True,
+        "filter_skip_vehicles": bool(row[5]) if len(row) > 5 else True,
     }
+
+
+async def toggle_filter_skip_bids(user_id: int) -> bool:
+    s = await get_user_settings(user_id)
+    new_val = not s.get("filter_skip_bids", True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users SET filter_skip_bids = ?, updated_at = datetime('now')
+            WHERE user_id = ?
+            """,
+            (1 if new_val else 0, user_id),
+        )
+        await db.commit()
+    return new_val
+
+
+async def toggle_filter_skip_vehicles(user_id: int) -> bool:
+    s = await get_user_settings(user_id)
+    new_val = not s.get("filter_skip_vehicles", True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users SET filter_skip_vehicles = ?, updated_at = datetime('now')
+            WHERE user_id = ?
+            """,
+            (1 if new_val else 0, user_id),
+        )
+        await db.commit()
+    return new_val
 
 
 async def set_platform(user_id: int, platform: str) -> None:

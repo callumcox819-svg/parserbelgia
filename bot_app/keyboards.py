@@ -10,6 +10,45 @@ from aiogram.types import (
 from bot_app.category_registry import categories_for_platform
 from bot_app.platforms import PLATFORMS, PLATFORM_2DEHANDS, PLATFORM_RICARDO
 
+
+def filters_keyboard(
+    *,
+    skip_bids: bool,
+    skip_vehicles: bool,
+    platform: str,
+) -> InlineKeyboardMarkup:
+    if platform != PLATFORM_2DEHANDS:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Фильтры только для 2dehands",
+                        callback_data=CB_SET_MENU,
+                    )
+                ],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)],
+            ]
+        )
+    bid_mark = "✅" if skip_bids else "⬜"
+    veh_mark = "✅" if skip_vehicles else "⬜"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{bid_mark} Без ставок (Bieden)",
+                    callback_data=CB_FILTER_SKIP_BIDS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{veh_mark} Без авто / броммеров",
+                    callback_data=CB_FILTER_SKIP_VEHICLES,
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)],
+        ]
+    )
+
 CB_MAIN_PARSE = "main:parse"
 CB_MAIN_SETTINGS = "main:settings"
 CB_MAIN_ADMIN = "main:admin"
@@ -18,6 +57,9 @@ CB_SET_PLATFORM = "set:platform"
 CB_SET_CATEGORIES = "set:categories"
 CB_SET_LIMIT = "set:limit"
 CB_SET_PROXY = "set:proxy"
+CB_SET_FILTERS = "set:filters"
+CB_FILTER_SKIP_BIDS = "filt:bids"
+CB_FILTER_SKIP_VEHICLES = "filt:veh"
 CB_SET_BACK = "set:back"
 CB_SET_MENU = "set:menu"
 
@@ -59,6 +101,7 @@ def settings_menu_keyboard() -> InlineKeyboardMarkup:
                 )
             ],
             [InlineKeyboardButton(text="🌐 Прокси", callback_data=CB_SET_PROXY)],
+            [InlineKeyboardButton(text="🚫 Фильтры", callback_data=CB_SET_FILTERS)],
             [InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_BACK)],
         ]
     )

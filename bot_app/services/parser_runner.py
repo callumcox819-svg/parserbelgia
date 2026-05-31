@@ -10,6 +10,7 @@ from bot_app.ricardo_categories import RICARDO_CATEGORY_BY_KEY
 from bot_app.storage import repo
 from settings import normalize_proxy, parse_proxy_list
 from twodehands_parser.category_parse import parse_l1_categories
+from twodehands_parser.filters import VEHICLE_CATEGORY_KEYS
 from twodehands_parser.http_client import BROWSER_HEADERS, search_session
 from twodehands_parser.url_builder import BASE, extract_l1_category_id
 from ricardo_parser.category_parse import parse_ricardo_categories
@@ -76,7 +77,19 @@ async def _run_2dehands(
     limit: int,
     proxies: list[str | None],
     skip_sellers: set[int],
+    *,
+    skip_auction_listings: bool = False,
+    skip_vehicle_categories: bool = False,
 ) -> dict[str, Any]:
+    if skip_vehicle_categories:
+        keys = [k for k in keys if k not in VEHICLE_CATEGORY_KEYS]
+
+    if not keys:
+        raise ValueError(
+            "Нет категорий для парсинга: включите категории или отключите "
+            "фильтр «без авто/броммеров» в настройках → Фильтры."
+        )
+
     l1_ids: list[int] = []
     resolve_proxy = proxies[0]
     for key in keys:
@@ -90,6 +103,7 @@ async def _run_2dehands(
                 limit=limit,
                 proxy=proxy,
                 skip_seller_ids=set(skip_sellers),
+                skip_auction_listings=skip_auction_listings,
             )
             return result
         except RuntimeError as exc:
@@ -158,7 +172,15 @@ async def run_user_parse(
     if platform == PLATFORM_RICARDO:
         result = await _run_ricardo(keys, limit, proxies, skip_sellers)
     else:
-        result = await _run_2dehands(user_id, keys, limit, proxies, skip_sellers)
+        result = await _run_2dehands(
+            user_id,
+            keys,
+            limit,
+            proxies,
+            skip_sellers,
+            skip_auction_listings=bool(settings.get("filter_skip_bids", True)),
+            skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
+        )
 
     new_sellers = _seller_ids_from_items(result.get("items", []))
     await repo.add_seen_sellers(user_id, platform, new_sellers)

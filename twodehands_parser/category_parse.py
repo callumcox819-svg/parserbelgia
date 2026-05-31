@@ -8,6 +8,7 @@ from typing import Any
 from .http_client import search_session
 from .parser import _fetch_search_page
 from .url_builder import api_url_from_params
+from .filters import listing_is_auction
 from .void_format import listing_to_void_item
 
 # POST /lrp/api/search часто даёт 403; пагинация только через GET.
@@ -47,6 +48,7 @@ async def parse_l1_categories(
     limit: int,
     proxy: str | None = None,
     skip_seller_ids: set[int] | None = None,
+    skip_auction_listings: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -56,6 +58,7 @@ async def parse_l1_categories(
     skip = set(skip_seller_ids) if skip_seller_ids else set()
     items: list[dict[str, Any]] = []
     seen_items: set[str] = set()
+    skipped_auctions = 0
 
     async with search_session(proxy) as (session, request_kwargs):
         for cat_id in category_ids:
@@ -91,6 +94,10 @@ async def parse_l1_categories(
                     break
 
                 for listing in listings:
+                    if skip_auction_listings and listing_is_auction(listing):
+                        skipped_auctions += 1
+                        continue
+
                     item_id = listing.get("itemId")
                     if item_id and item_id in seen_items:
                         continue
@@ -117,4 +124,4 @@ async def parse_l1_categories(
                 if offset >= total:
                     break
 
-    return {"items": items}
+    return {"items": items, "stats": {"skipped_auctions": skipped_auctions}}

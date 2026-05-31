@@ -66,6 +66,10 @@ async def run_parser(callback: CallbackQuery) -> None:
         limit = settings["json_limit"]
         stats = result.get("stats") or {}
         extra = ""
+        if platform == "2dehands" and stats:
+            skipped = int(stats.get("skipped_auctions") or 0)
+            if skipped:
+                extra += f"\n🚫 Пропущено аукционов (Bieden): **{skipped}**"
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)
             proxies_n = int(stats.get("proxies") or 0)

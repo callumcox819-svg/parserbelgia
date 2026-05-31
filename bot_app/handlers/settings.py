@@ -14,7 +14,11 @@ from bot_app.keyboards import (
     CB_SET_LIMIT,
     CB_SET_PLATFORM,
     CB_SET_PROXY,
+    CB_SET_FILTERS,
+    CB_FILTER_SKIP_BIDS,
+    CB_FILTER_SKIP_VEHICLES,
     cancel_keyboard,
+    filters_keyboard,
     categories_keyboard,
     main_menu_keyboard,
     platform_keyboard,
@@ -44,6 +48,14 @@ async def _settings_summary(user_id: int) -> str:
         if platform == "2dehands"
         else "~1.5 с категории (как void), карточки — опционально"
     )
+    filters_line = ""
+    if platform == "2dehands":
+        bids = "вкл" if s.get("filter_skip_bids", True) else "выкл"
+        veh = "вкл" if s.get("filter_skip_vehicles", True) else "выкл"
+        filters_line = (
+            f"\n🚫 Фильтры: без **Bieden** ({bids}), "
+            f"без **авто/броммеров** ({veh})"
+        )
     return (
         "⚙️ **Настройки**\n\n"
         f"🏪 Площадка: **{plat['title']}**\n"
@@ -51,6 +63,7 @@ async def _settings_summary(user_id: int) -> str:
         f"📂 Категорий включено: **{len(keys)}**\n"
         f"🌐 Прокси ({plat['proxy_hint']}): {proxy}\n"
         f"⏱ Скорость: {delay_hint}"
+        f"{filters_line}"
     )
 
 
@@ -170,6 +183,67 @@ async def toggle_category(callback: CallbackQuery) -> None:
         parse_mode="Markdown",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == CB_SET_FILTERS)
+async def open_filters(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    s = await repo.get_user_settings(uid)
+    platform = normalize_platform(s.get("platform"))
+    text = (
+        "🚫 **Фильтры (2dehands)**\n\n"
+        "**Без ставок (Bieden)** — пропускать аукционы "
+        "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
+        "**Без авто / броммеров** — не парсить категории:\n"
+        "🚗 Auto's, 🔧 Auto-onderdelen, 🚲 Fietsen en Brommers.\n\n"
+        "Вкл/выкл кнопками ниже."
+    )
+    if platform != "2dehands":
+        text = "Фильтры доступны только для **2dehands**."
+    await callback.message.edit_text(
+        text,
+        reply_markup=filters_keyboard(
+            skip_bids=bool(s.get("filter_skip_bids", True)),
+            skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            platform=platform,
+        ),
+        parse_mode="Markdown",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == CB_FILTER_SKIP_BIDS)
+async def toggle_skip_bids(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await repo.toggle_filter_skip_bids(uid)
+    s = await repo.get_user_settings(uid)
+    platform = normalize_platform(s.get("platform"))
+    await callback.message.edit_reply_markup(
+        reply_markup=filters_keyboard(
+            skip_bids=bool(s.get("filter_skip_bids", True)),
+            skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            platform=platform,
+        ),
+    )
+    state = "включён" if s.get("filter_skip_bids", True) else "выключен"
+    await callback.answer(f"Без Bieden: {state}")
+
+
+@router.callback_query(F.data == CB_FILTER_SKIP_VEHICLES)
+async def toggle_skip_vehicles(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await repo.toggle_filter_skip_vehicles(uid)
+    s = await repo.get_user_settings(uid)
+    platform = normalize_platform(s.get("platform"))
+    await callback.message.edit_reply_markup(
+        reply_markup=filters_keyboard(
+            skip_bids=bool(s.get("filter_skip_bids", True)),
+            skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            platform=platform,
+        ),
+    )
+    state = "включён" if s.get("filter_skip_vehicles", True) else "выключен"
+    await callback.answer(f"Без авто/броммеров: {state}")
 
 
 @router.callback_query(F.data == CB_SET_LIMIT)
