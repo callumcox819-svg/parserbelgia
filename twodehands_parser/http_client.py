@@ -76,7 +76,7 @@ async def warmup_session(session: aiohttp.ClientSession, proxy: str | None) -> N
 async def search_session(
     proxy: str | None,
 ) -> AsyncIterator[tuple[aiohttp.ClientSession, dict[str, Any]]]:
-    timeout = aiohttp.ClientTimeout(total=90)
+    timeout = aiohttp.ClientTimeout(total=90, connect=20, sock_connect=20, sock_read=45)
     connector = create_connector(proxy)
     jar = aiohttp.CookieJar(unsafe=True)
     async with aiohttp.ClientSession(

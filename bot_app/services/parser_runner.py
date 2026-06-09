@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+ProgressFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 from bot_app.categories import CATEGORY_BY_KEY
 from bot_app.platforms import PLATFORMS, PLATFORM_RICARDO, normalize_platform
@@ -79,6 +82,7 @@ async def _run_2dehands(
     *,
     skip_auction_listings: bool = False,
     skip_vehicle_categories: bool = False,
+    on_progress: ProgressFn = None,
 ) -> dict[str, Any]:
     if skip_vehicle_categories:
         keys = [k for k in keys if k not in VEHICLE_CATEGORY_KEYS]
@@ -101,6 +105,7 @@ async def _run_2dehands(
             proxies=proxies,
             skip_seller_ids=set(skip_sellers),
             skip_auction_listings=skip_auction_listings,
+            on_progress=on_progress,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc):
@@ -140,7 +145,11 @@ async def _run_ricardo(
         raise
 
 
-async def run_user_parse(user_id: int) -> dict[str, Any]:
+async def run_user_parse(
+    user_id: int,
+    *,
+    on_progress: ProgressFn = None,
+) -> dict[str, Any]:
     settings = await repo.get_user_settings(user_id)
     platform = normalize_platform(settings.get("platform"))
     keys = await repo.get_enabled_category_keys(user_id, platform)
@@ -151,6 +160,15 @@ async def run_user_parse(user_id: int) -> dict[str, Any]:
     skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
     limit = int(settings["json_limit"])
 
+    logger.info(
+        "parse user=%s platform=%s limit=%s cats=%s proxies=%s seen=%s",
+        user_id,
+        platform,
+        limit,
+        len(keys),
+        len(proxies),
+        len(skip_sellers),
+    )
     if platform == PLATFORM_RICARDO:
         result = await _run_ricardo(keys, limit, proxies, skip_sellers)
     else:
@@ -162,6 +180,7 @@ async def run_user_parse(user_id: int) -> dict[str, Any]:
             skip_sellers,
             skip_auction_listings=bool(settings.get("filter_skip_bids", True)),
             skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
+            on_progress=on_progress,
         )
 
     stats = result.setdefault("stats", {})

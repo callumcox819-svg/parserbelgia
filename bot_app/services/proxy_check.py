@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from bot_app.platforms import PLATFORM_2DEHANDS, PLATFORM_RICARDO, normalize_platform
 
@@ -33,9 +36,22 @@ def proxy_geo_warnings(proxies: list[str], platform: str) -> list[str]:
     return warnings
 
 
+def _proxy_log_label(proxy: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(proxy)
+        host = p.hostname or "?"
+        user = (p.username or "")[:24]
+        return f"{host} user={user}"
+    except Exception:
+        return "proxy"
+
+
 async def verify_first_proxy(platform: str, proxy: str) -> None:
     """Быстрая проверка: прокси открывает главную площадки."""
     platform = normalize_platform(platform)
+    logger.info("proxy verify start platform=%s %s", platform, _proxy_log_label(proxy))
     if platform == PLATFORM_RICARDO:
         from ricardo_parser.http_client import BROWSER_HEADERS, browse_session
 
@@ -57,3 +73,4 @@ async def verify_first_proxy(platform: str, proxy: str) -> None:
 
         async with search_session(proxy) as (session, request_kwargs):
             await warmup_session(session, proxy)
+    logger.info("proxy verify ok platform=%s", platform)

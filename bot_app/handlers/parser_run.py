@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -55,22 +57,57 @@ async def run_parser(callback: CallbackQuery) -> None:
     settings = await repo.get_user_settings(uid)
     platform = normalize_platform(settings.get("platform"))
     plat_label = "Ricardo" if platform == "ricardo" else "2dehands"
-    status = await callback.message.answer(f"⏳ Проверка прокси…")
+    status = await callback.message.answer("⏳ Проверка прокси…")
+    logger.info("parse click user=%s platform=%s", uid, platform)
 
     try:
         proxies = user_proxies_or_error(settings, platform)
-        await verify_first_proxy(platform, proxies[0])
+        await asyncio.wait_for(
+            verify_first_proxy(platform, proxies[0]),
+            timeout=35.0,
+        )
     except ValueError as exc:
         await status.edit_text(str(exc), parse_mode="Markdown")
+        return
+    except asyncio.TimeoutError:
+        await status.edit_text(
+            "❌ Прокси не ответил за 35 с. Проверьте host/port/login или LomaProxy."
+        )
         return
     except RuntimeError as exc:
         await status.edit_text(f"❌ {exc}")
         return
 
-    await status.edit_text(f"⏳ Парсинг {plat_label}…")
+    last_progress_edit = 0.0
+
+    async def on_progress(stats: dict) -> None:
+        nonlocal last_progress_edit
+        now = time.monotonic()
+        if now - last_progress_edit < 10.0:
+            return
+        last_progress_edit = now
+        try:
+            await status.edit_text(
+                f"⏳ Парсинг {plat_label}…\n"
+                f"Страниц API: **{stats.get('pages_fetched', 0)}**, "
+                f"найдено: **{stats.get('items', 0)}**",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            logger.debug("progress edit skipped", exc_info=True)
+
+    await status.edit_text(f"⏳ Парсинг {plat_label}… (старт)")
 
     try:
-        result = await run_user_parse(uid)
+        result = await asyncio.wait_for(
+            run_user_parse(uid, on_progress=on_progress),
+            timeout=600.0,
+        )
+    except asyncio.TimeoutError:
+        await status.edit_text(
+            "❌ Таймаут 10 мин. Снизьте лимит JSON или смените прокси."
+        )
+        return
     except ValueError as exc:
         await status.edit_text(f"⚠️ {exc}", parse_mode="Markdown")
         return

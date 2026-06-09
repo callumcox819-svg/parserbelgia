@@ -4,7 +4,10 @@ import asyncio
 import logging
 import os
 import random
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+ProgressFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 from .http_client import search_session
 from .parser import _fetch_search_page
@@ -107,6 +110,7 @@ async def parse_l1_categories(
     proxies: list[str | None] | None = None,
     skip_seller_ids: set[int] | None = None,
     skip_auction_listings: bool = False,
+    on_progress: ProgressFn = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -127,6 +131,26 @@ async def parse_l1_categories(
     stopped_early = False
     max_offset = _max_offset()
 
+    async def _report() -> None:
+        if not on_progress:
+            return
+        await on_progress(
+            {
+                "items": len(items),
+                "pages_fetched": pages_fetched,
+                "listings_scanned": listings_scanned,
+                "skipped_auctions": skipped_auctions,
+                "skipped_sellers": skipped_sellers,
+            }
+        )
+
+    logger.info(
+        "2dehands parse start cats=%s limit=%s proxies=%s seen_sellers=%s",
+        len(category_ids),
+        limit,
+        len(proxy_list),
+        len(skip),
+    )
     pool = _ProxySessions(proxy_list)
     try:
         for cat_id in category_ids:
@@ -158,6 +182,12 @@ async def parse_l1_categories(
                 api_url = api_url_from_params(
                     base_params, limit=page_limit, offset=offset
                 )
+                logger.info(
+                    "2dehands fetch cat=%s offset=%s items=%s",
+                    cat_id,
+                    offset,
+                    len(items),
+                )
                 try:
                     data = await pool.fetch(api_url)
                 except RuntimeError as exc:
@@ -173,6 +203,7 @@ async def parse_l1_categories(
 
                 listings = data.get("listings") or []
                 pages_fetched += 1
+                await _report()
                 if not listings:
                     break
 
