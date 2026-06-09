@@ -17,6 +17,7 @@ from bot_app.keyboards import (
     CB_SET_FILTERS,
     CB_FILTER_SKIP_BIDS,
     CB_FILTER_SKIP_VEHICLES,
+    CB_FILTER_CLEAR_SELLERS,
     cancel_keyboard,
     filters_keyboard,
     categories_keyboard,
@@ -28,6 +29,7 @@ from bot_app.category_registry import categories_for_platform
 from bot_app.platforms import PLATFORMS, normalize_platform
 from bot_app.states import SettingsForm
 from bot_app.storage import repo
+from bot_app.services.proxy_check import proxy_geo_warnings
 from settings import normalize_proxy, parse_proxy_list
 
 router = Router(name="settings")
@@ -42,7 +44,7 @@ async def _settings_summary(user_id: int) -> str:
     if plist:
         proxy = f"**{len(plist)}** шт. (ротация)"
     else:
-        proxy = "не задан (глобальный с сервера)"
+        proxy = "❌ **не задан** — укажите в «Прокси»"
     delay_hint = (
         "~0.8 с между запросами"
         if platform == "2dehands"
@@ -196,10 +198,16 @@ async def open_filters(callback: CallbackQuery) -> None:
         "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
         "**Без авто / броммеров** — не парсить категории:\n"
         "🚗 Авто, 🔧 Автозапчасти, 🚲 Вело и мопеды.\n\n"
+        "**Память продавцов** — бот не отдаёт одного продавца дважды. "
+        "Если «ничего не найдено» — нажмите «Сбросить память».\n\n"
         "Вкл/выкл кнопками ниже."
     )
     if platform != "2dehands":
-        text = "Фильтры доступны только для **2dehands**."
+        text = (
+            "Фильтры категорий — только для **2dehands**.\n\n"
+            "**Память продавцов** общая: если Ricardo «ничего не нашёл», "
+            "сбросьте память кнопкой ниже."
+        )
     await callback.message.edit_text(
         text,
         reply_markup=filters_keyboard(
@@ -227,6 +235,14 @@ async def toggle_skip_bids(callback: CallbackQuery) -> None:
     )
     state = "включён" if s.get("filter_skip_bids", True) else "выключен"
     await callback.answer(f"Без Bieden: {state}")
+
+
+@router.callback_query(F.data == CB_FILTER_CLEAR_SELLERS)
+async def clear_sellers_memory(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    platform = normalize_platform((await repo.get_user_settings(uid)).get("platform"))
+    removed = await repo.clear_seen_sellers(uid, platform)
+    await callback.answer(f"Сброшено продавцов: {removed}")
 
 
 @router.callback_query(F.data == CB_FILTER_SKIP_VEHICLES)
@@ -347,8 +363,15 @@ async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -
     await repo.set_proxy(message.from_user.id, stored)
     await state.clear()
     count = len(proxies)
+    platform = normalize_platform(
+        (await repo.get_user_settings(message.from_user.id)).get("platform")
+    )
+    extra = ""
+    warns = proxy_geo_warnings(proxies, platform)
+    if warns:
+        extra = "\n\n⚠️ " + warns[0]
     await message.answer(
-        f"✅ Сохранено прокси: **{count}** (ротация при парсинге).",
+        f"✅ Сохранено прокси: **{count}** (только ваши, без сервера).{extra}",
         reply_markup=main_menu_keyboard(is_admin=is_admin_user),
         parse_mode="Markdown",
     )

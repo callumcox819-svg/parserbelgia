@@ -218,6 +218,29 @@ async def get_seen_seller_ids(user_id: int, platform: str) -> set[int]:
     return {int(r[0]) for r in rows}
 
 
+async def clear_seen_sellers(user_id: int, platform: str) -> int:
+    """Сброс памяти продавцов. Возвращает число удалённых записей."""
+    platform = normalize_platform(platform)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT COUNT(*) FROM user_seen_sellers
+            WHERE user_id = ? AND platform = ?
+            """,
+            (user_id, platform),
+        ) as cur:
+            n = int((await cur.fetchone())[0])
+        await db.execute(
+            """
+            DELETE FROM user_seen_sellers
+            WHERE user_id = ? AND platform = ?
+            """,
+            (user_id, platform),
+        )
+        await db.commit()
+    return n
+
+
 async def add_seen_sellers(
     user_id: int, platform: str, seller_ids: set[int]
 ) -> None:

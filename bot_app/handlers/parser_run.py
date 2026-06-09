@@ -9,14 +9,43 @@ from pathlib import Path
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, FSInputFile
 
-from bot_app.app_config import SETTINGS
 from bot_app.keyboards import CB_MAIN_PARSE
 from bot_app.platforms import normalize_platform
-from bot_app.services.parser_runner import run_user_parse
+from bot_app.services.parser_runner import run_user_parse, user_proxies_or_error
+from bot_app.services.proxy_check import verify_first_proxy
 from bot_app.storage import repo
 
 router = Router(name="parser")
 logger = logging.getLogger(__name__)
+
+
+def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
+    lines = [
+        "📭 **Ничего не найдено**",
+        "",
+        f"Просмотрено страниц API: **{stats.get('pages_fetched', 0)}**",
+        f"Листингов на страницах: **{stats.get('listings_scanned', 0)}**",
+    ]
+    if platform == "2dehands":
+        auctions = int(stats.get("skipped_auctions") or 0)
+        sellers = int(stats.get("skipped_sellers") or 0)
+        if auctions:
+            lines.append(f"Пропущено аукционов (Bieden): **{auctions}**")
+        if sellers:
+            lines.append(f"Пропущено (продавец уже был): **{sellers}**")
+    if seen_before:
+        lines.append(f"Продавцов в памяти бота: **{seen_before}**")
+    lines.extend(
+        [
+            "",
+            "**Частые причины:**",
+            "• прокси не той страны (2dehands → BE, Ricardo → CH);",
+            "• все подходящие продавцы уже в памяти — сбросьте в Фильтры;",
+            "• фильтр Bieden отсекает большинство объявлений;",
+            "• CloudFront 403 — смените прокси или снизьте лимит.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 @router.callback_query(F.data == CB_MAIN_PARSE)
@@ -26,16 +55,24 @@ async def run_parser(callback: CallbackQuery) -> None:
     settings = await repo.get_user_settings(uid)
     platform = normalize_platform(settings.get("platform"))
     plat_label = "Ricardo" if platform == "ricardo" else "2dehands"
-    status = await callback.message.answer(f"⏳ Парсинг {plat_label}…")
+    status = await callback.message.answer(f"⏳ Проверка прокси…")
 
     try:
-        result = await run_user_parse(
-            uid,
-            SETTINGS.get("proxy"),
-            fallback_proxies=SETTINGS.get("proxies"),
-        )
+        proxies = user_proxies_or_error(settings, platform)
+        await verify_first_proxy(platform, proxies[0])
     except ValueError as exc:
-        await status.edit_text(f"⚠️ {exc}")
+        await status.edit_text(str(exc), parse_mode="Markdown")
+        return
+    except RuntimeError as exc:
+        await status.edit_text(f"❌ {exc}")
+        return
+
+    await status.edit_text(f"⏳ Парсинг {plat_label}…")
+
+    try:
+        result = await run_user_parse(uid)
+    except ValueError as exc:
+        await status.edit_text(f"⚠️ {exc}", parse_mode="Markdown")
         return
     except Exception as exc:
         logger.exception("parse failed user=%s", uid)
@@ -44,9 +81,12 @@ async def run_parser(callback: CallbackQuery) -> None:
 
     items = result.get("items", [])
     count = len(items)
+    stats = result.get("stats") or {}
     if count == 0:
+        seen_before = int(stats.get("seen_sellers_before") or 0)
         await status.edit_text(
-            "Объявления не найдены (категории пустые или все продавцы уже были)."
+            _empty_result_text(platform, stats, seen_before),
+            parse_mode="Markdown",
         )
         return
 
@@ -70,6 +110,9 @@ async def run_parser(callback: CallbackQuery) -> None:
             skipped = int(stats.get("skipped_auctions") or 0)
             if skipped:
                 extra += f"\n🚫 Пропущено аукционов (Bieden): **{skipped}**"
+            if stats.get("partial"):
+                note = stats.get("note") or "Частичный результат (403 / лимит страниц)."
+                extra += f"\n\n⚠️ {note}"
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)
             proxies_n = int(stats.get("proxies") or 0)

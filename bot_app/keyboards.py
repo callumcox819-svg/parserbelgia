@@ -22,8 +22,8 @@ def filters_keyboard(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Фильтры только для 2dehands",
-                        callback_data=CB_SET_MENU,
+                        text="🗑 Сбросить память продавцов",
+                        callback_data=CB_FILTER_CLEAR_SELLERS,
                     )
                 ],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)],
@@ -45,6 +45,12 @@ def filters_keyboard(
                     callback_data=CB_FILTER_SKIP_VEHICLES,
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Сбросить память продавцов",
+                    callback_data=CB_FILTER_CLEAR_SELLERS,
+                )
+            ],
             [InlineKeyboardButton(text="◀️ Назад", callback_data=CB_SET_MENU)],
         ]
     )
@@ -60,6 +66,7 @@ CB_SET_PROXY = "set:proxy"
 CB_SET_FILTERS = "set:filters"
 CB_FILTER_SKIP_BIDS = "filt:bids"
 CB_FILTER_SKIP_VEHICLES = "filt:veh"
+CB_FILTER_CLEAR_SELLERS = "filt:clear_sellers"
 CB_SET_BACK = "set:back"
 CB_SET_MENU = "set:menu"
 

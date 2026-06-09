@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from bot_app.categories import CATEGORY_BY_KEY
-from bot_app.platforms import PLATFORM_RICARDO, normalize_platform
+from bot_app.platforms import PLATFORMS, PLATFORM_RICARDO, normalize_platform
 from bot_app.ricardo_categories import RICARDO_CATEGORY_BY_KEY
 from bot_app.storage import repo
 from settings import normalize_proxy, parse_proxy_list
@@ -18,17 +18,16 @@ from ricardo_parser.category_parse import parse_ricardo_categories
 logger = logging.getLogger(__name__)
 
 
-def _merge_proxies(*groups: list[str] | None) -> list[str | None]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        if not group:
-            continue
-        for p in group:
-            if p and p not in seen:
-                seen.add(p)
-                out.append(p)
-    return out or [None]
+def user_proxies_or_error(settings: dict[str, Any], platform: str) -> list[str]:
+    """Только прокси пользователя из настроек — без серверного fallback."""
+    proxies = parse_proxy_list(settings.get("proxy"))
+    if not proxies:
+        hint = PLATFORMS[normalize_platform(platform)]["proxy_hint"]
+        raise ValueError(
+            f"Укажите прокси: **Настройки → 🌐 Прокси** ({hint}).\n"
+            "Каждый пользователь парсит только через свой прокси."
+        )
+    return proxies
 
 
 async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
@@ -95,25 +94,19 @@ async def _run_2dehands(
     for key in keys:
         l1_ids.append(await _resolve_l1_id(key, resolve_proxy))
 
-    last_error: Exception | None = None
-    for proxy in proxies:
-        try:
-            result = await parse_l1_categories(
-                l1_ids,
-                limit=limit,
-                proxy=proxy,
-                skip_seller_ids=set(skip_sellers),
-                skip_auction_listings=skip_auction_listings,
-            )
-            return result
-        except RuntimeError as exc:
-            last_error = exc
-            if "403" not in str(exc) and "Forbidden" not in str(exc):
-                raise
-            logger.warning("2dehands 403 proxy=%s, try next", proxy)
-    if last_error:
-        raise last_error
-    raise RuntimeError("Не удалось выполнить парсинг 2dehands.")
+    try:
+        return await parse_l1_categories(
+            l1_ids,
+            limit=limit,
+            proxies=proxies,
+            skip_seller_ids=set(skip_sellers),
+            skip_auction_listings=skip_auction_listings,
+        )
+    except RuntimeError as exc:
+        if "403" not in str(exc) and "Forbidden" not in str(exc):
+            raise
+        logger.error("2dehands failed all proxies: %s", exc)
+        raise
 
 
 async def _run_ricardo(
@@ -147,25 +140,14 @@ async def _run_ricardo(
         raise
 
 
-async def run_user_parse(
-    user_id: int,
-    fallback_proxy: str | None,
-    *,
-    fallback_proxies: list[str] | None = None,
-) -> dict[str, Any]:
+async def run_user_parse(user_id: int) -> dict[str, Any]:
     settings = await repo.get_user_settings(user_id)
     platform = normalize_platform(settings.get("platform"))
     keys = await repo.get_enabled_category_keys(user_id, platform)
     if not keys:
         raise ValueError("Включите хотя бы одну категорию в настройках.")
 
-    user_proxies = parse_proxy_list(settings.get("proxy"))
-    server_proxies = list(fallback_proxies or [])
-    if not server_proxies and fallback_proxy:
-        server_proxies = parse_proxy_list(fallback_proxy)
-
-    proxies = _merge_proxies(user_proxies, server_proxies)
-
+    proxies = user_proxies_or_error(settings, platform)
     skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
     limit = int(settings["json_limit"])
 
@@ -181,6 +163,10 @@ async def run_user_parse(
             skip_auction_listings=bool(settings.get("filter_skip_bids", True)),
             skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
         )
+
+    stats = result.setdefault("stats", {})
+    stats["proxies_used"] = len(proxies)
+    stats["seen_sellers_before"] = len(skip_sellers)
 
     new_sellers = _seller_ids_from_items(result.get("items", []))
     await repo.add_seen_sellers(user_id, platform, new_sellers)
