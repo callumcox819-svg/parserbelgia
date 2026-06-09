@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, FSInputFile
 
 from bot_app.keyboards import CB_MAIN_PARSE
 from bot_app.platforms import normalize_platform
-from bot_app.services.parser_runner import run_user_parse, user_proxies_or_error
+from bot_app.services.parser_runner import resolve_user_proxies, run_user_parse
 from bot_app.services.proxy_check import verify_first_proxy
 from bot_app.storage import repo
 
@@ -57,26 +57,35 @@ async def run_parser(callback: CallbackQuery) -> None:
     settings = await repo.get_user_settings(uid)
     platform = normalize_platform(settings.get("platform"))
     plat_label = "Ricardo" if platform == "ricardo" else "2dehands"
-    status = await callback.message.answer("⏳ Проверка прокси…")
-    logger.info("parse click user=%s platform=%s", uid, platform)
+    proxies = resolve_user_proxies(settings)
+    using_direct = proxies == [None]
+    logger.info(
+        "parse click user=%s platform=%s direct=%s proxies=%s",
+        uid,
+        platform,
+        using_direct,
+        len(proxies),
+    )
 
-    try:
-        proxies = user_proxies_or_error(settings, platform)
-        await asyncio.wait_for(
-            verify_first_proxy(platform, proxies[0]),
-            timeout=35.0,
+    if using_direct:
+        status = await callback.message.answer(
+            f"⏳ Парсинг {plat_label}… (без прокси, с сервера)"
         )
-    except ValueError as exc:
-        await status.edit_text(str(exc), parse_mode="Markdown")
-        return
-    except asyncio.TimeoutError:
-        await status.edit_text(
-            "❌ Прокси не ответил за 35 с. Проверьте host/port/login или LomaProxy."
-        )
-        return
-    except RuntimeError as exc:
-        await status.edit_text(f"❌ {exc}")
-        return
+    else:
+        status = await callback.message.answer("⏳ Проверка прокси…")
+        try:
+            await asyncio.wait_for(
+                verify_first_proxy(platform, proxies[0]),
+                timeout=35.0,
+            )
+        except asyncio.TimeoutError:
+            await status.edit_text(
+                "❌ Прокси не ответил за 35 с. Проверьте host/port/login или LomaProxy."
+            )
+            return
+        except RuntimeError as exc:
+            await status.edit_text(f"❌ {exc}")
+            return
 
     last_progress_edit = 0.0
 

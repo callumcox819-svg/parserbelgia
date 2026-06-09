@@ -8,7 +8,7 @@ from typing import Any
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 from bot_app.categories import CATEGORY_BY_KEY
-from bot_app.platforms import PLATFORMS, PLATFORM_RICARDO, normalize_platform
+from bot_app.platforms import PLATFORM_RICARDO, normalize_platform
 from bot_app.ricardo_categories import RICARDO_CATEGORY_BY_KEY
 from bot_app.storage import repo
 from settings import normalize_proxy, parse_proxy_list
@@ -21,16 +21,10 @@ from ricardo_parser.category_parse import parse_ricardo_categories
 logger = logging.getLogger(__name__)
 
 
-def user_proxies_or_error(settings: dict[str, Any], platform: str) -> list[str]:
-    """Только прокси пользователя из настроек — без серверного fallback."""
+def resolve_user_proxies(settings: dict[str, Any]) -> list[str | None]:
+    """Прокси пользователя из настроек; если не задан — прямое подключение [None]."""
     proxies = parse_proxy_list(settings.get("proxy"))
-    if not proxies:
-        hint = PLATFORMS[normalize_platform(platform)]["proxy_hint"]
-        raise ValueError(
-            f"Укажите прокси: **Настройки → 🌐 Прокси** ({hint}).\n"
-            "Каждый пользователь парсит только через свой прокси."
-        )
-    return proxies
+    return proxies if proxies else [None]
 
 
 async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
@@ -156,7 +150,7 @@ async def run_user_parse(
     if not keys:
         raise ValueError("Включите хотя бы одну категорию в настройках.")
 
-    proxies = user_proxies_or_error(settings, platform)
+    proxies = resolve_user_proxies(settings)
     skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
     limit = int(settings["json_limit"])
 

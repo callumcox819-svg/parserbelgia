@@ -44,7 +44,7 @@ async def _settings_summary(user_id: int) -> str:
     if plist:
         proxy = f"**{len(plist)}** шт. (ротация)"
     else:
-        proxy = "❌ **не задан** — укажите в «Прокси»"
+        proxy = "**выкл** — прямо с сервера (для 2dehands часто стабильнее)"
     delay_hint = (
         "~0.8 с между запросами"
         if platform == "2dehands"
@@ -310,7 +310,8 @@ async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
         "HTTP: `http://login:pass@host:port`\n\n"
         "**Несколько прокси** — каждый с новой строки "
         "(ротация при 403 Cloudflare).\n"
-        "Сброс: `0` или `off`",
+        "Без прокси (прямо с сервера): `off` или `0`\n"
+        "Для **2dehands** без прокси часто стабильнее, чем Loma BE.",
         parse_mode="Markdown",
         reply_markup=cancel_keyboard(),
     )
@@ -331,7 +332,8 @@ async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -
         await repo.set_proxy(message.from_user.id, None)
         await state.clear()
         await message.answer(
-            "✅ Прокси сброшен.",
+            "✅ Прокси выкл — парсинг **напрямую** с сервера.\n"
+            "Для 2dehands это часто даёт больше объявлений, чем через Loma.",
             reply_markup=main_menu_keyboard(is_admin=is_admin_user),
         )
         return
@@ -371,7 +373,8 @@ async def save_proxy(message: Message, state: FSMContext, is_admin_user: bool) -
     if warns:
         extra = "\n\n⚠️ " + warns[0]
     await message.answer(
-        f"✅ Сохранено прокси: **{count}** (только ваши, без сервера).{extra}",
+        f"✅ Сохранено прокси: **{count}**.{extra}\n"
+        "Если мало объявлений — попробуйте `off` (без прокси).",
         reply_markup=main_menu_keyboard(is_admin=is_admin_user),
         parse_mode="Markdown",
     )
