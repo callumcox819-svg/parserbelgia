@@ -1,5 +1,6 @@
 import unittest
 
+from twodehands_parser.pagination import page_request_limit
 from twodehands_parser.filters import (
     VEHICLE_CATEGORY_KEYS,
     listing_is_auction,
@@ -42,6 +43,13 @@ class TwoDehandsFiltersTest(unittest.TestCase):
     def test_vehicle_keys(self) -> None:
         self.assertIn("autos", VEHICLE_CATEGORY_KEYS)
         self.assertIn("fietsen-en-brommers", VEHICLE_CATEGORY_KEYS)
+
+    def test_page_request_limit_never_below_api_min(self) -> None:
+        self.assertEqual(page_request_limit(1), 30)
+        self.assertEqual(page_request_limit(16), 30)
+        self.assertEqual(page_request_limit(30), 30)
+        self.assertEqual(page_request_limit(50), 50)
+        self.assertEqual(page_request_limit(200), 100)
 
 
 if __name__ == "__main__":

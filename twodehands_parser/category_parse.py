@@ -15,8 +15,9 @@ from .url_builder import api_url_from_params
 from .filters import listing_is_auction, void_item_is_auction_price
 from .void_format import listing_to_void_item
 
+from .pagination import PAGE_SIZE, page_request_limit
+
 # POST /lrp/api/search часто даёт 403; пагинация только через GET.
-PAGE_SIZE = 100
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ async def parse_l1_categories(
     listings_scanned = 0
     partial_reason: str | None = None
     had_403 = False
+    had_400 = False
 
     async def _report() -> None:
         if not on_progress:
@@ -161,7 +163,7 @@ async def parse_l1_categories(
 
             while len(items) < limit:
                 items_before_page = len(items)
-                page_limit = min(limit - len(items), PAGE_SIZE)
+                page_limit = page_request_limit(limit - len(items))
                 await _throttle()
                 api_url = api_url_from_params(
                     base_params, limit=page_limit, offset=offset
@@ -175,16 +177,27 @@ async def parse_l1_categories(
                 try:
                     data = await pool.fetch(api_url)
                 except RuntimeError as exc:
-                    if "403" not in str(exc):
-                        raise
-                    had_403 = True
-                    logger.warning(
-                        "2dehands 403 cat=%s offset=%s items=%s, next category",
-                        cat_id,
-                        offset,
-                        len(items),
-                    )
-                    break
+                    err = str(exc)
+                    if "403" in err:
+                        had_403 = True
+                        logger.warning(
+                            "2dehands 403 cat=%s offset=%s items=%s, next category",
+                            cat_id,
+                            offset,
+                            len(items),
+                        )
+                        break
+                    if "400" in err:
+                        had_400 = True
+                        logger.warning(
+                            "2dehands 400 cat=%s offset=%s limit=%s items=%s, next category",
+                            cat_id,
+                            offset,
+                            page_limit,
+                            len(items),
+                        )
+                        break
+                    raise
 
                 listings = data.get("listings") or []
                 pages_fetched += 1
@@ -253,6 +266,8 @@ async def parse_l1_categories(
 
     if had_403 and len(items) < limit:
         partial_reason = "403"
+    elif had_400 and len(items) < limit:
+        partial_reason = "400"
 
     stats: dict[str, Any] = {
         "skipped_auctions": skipped_auctions,
@@ -262,14 +277,20 @@ async def parse_l1_categories(
     }
     if len(items) < limit and items:
         stats["shortfall"] = True
-    if partial_reason == "403" and items:
+    if partial_reason in ("403", "400") and items:
         stats["partial"] = True
-        stats["partial_reason"] = "403"
-        stats["note"] = (
-            f"Собрано **{len(items)}** из **{limit}**. CloudFront **403** — "
-            "**Прокси → off** (для 2dehands), сбросьте память продавцов или "
-            "выключите «Не повторять продавцов» в Фильтры."
-        )
+        stats["partial_reason"] = partial_reason
+        if partial_reason == "403":
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}**. CloudFront **403** — "
+                "**Прокси → off** (для 2dehands), сбросьте память продавцов или "
+                "выключите «Не повторять продавцов» в Фильтры."
+            )
+        else:
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}**. API **400** на части "
+                "категорий (лимит/offset) — попробуйте снова или снизьте лимит."
+            )
     elif len(items) < limit and skipped_sellers > limit and items:
         stats["note"] = (
             f"Собрано **{len(items)}** из **{limit}**. "

@@ -15,6 +15,7 @@ from .url_builder import (
     normalize_browser_url,
 )
 from .http_client import API_HEADERS, search_session
+from .pagination import page_request_limit
 from .void_format import listing_to_void_item
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ async def parse_2dehands(
             if max_pages is not None and pages >= max_pages:
                 break
             pages += 1
-            page_limit = min(limit - len(items), 100)
+            page_limit = page_request_limit(limit - len(items), page_size=100)
 
             api_url = api_url_from_params(
                 base_params, limit=page_limit, offset=offset
