@@ -57,14 +57,19 @@ async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
     return cat_id
 
 
-def _seller_ids_from_items(items: list[dict[str, Any]]) -> set[int]:
-    sellers: set[int] = set()
+def _item_ids_from_void_items(items: list[dict[str, Any]]) -> set[str]:
+    ids: set[str] = set()
     for item in items:
-        link = item.get("person_link") or ""
-        match = re.search(r"/(\d+)/?\s*$", link.rstrip("/"))
-        if match:
-            sellers.add(int(match.group(1)))
-    return sellers
+        link = str(item.get("item_link") or "")
+        if "2dehands.be/" in link:
+            part = link.rstrip("/").split("/")[-1]
+            if part:
+                ids.add(part)
+            continue
+        m = re.search(r"/a/(\d+)", link)
+        if m:
+            ids.add(m.group(1))
+    return ids
 
 
 async def _run_2dehands(
@@ -72,7 +77,7 @@ async def _run_2dehands(
     keys: list[str],
     limit: int,
     proxies: list[str | None],
-    skip_sellers: set[int],
+    skip_items: set[str],
     *,
     skip_auction_listings: bool = False,
     skip_vehicle_categories: bool = False,
@@ -99,7 +104,7 @@ async def _run_2dehands(
             l1_ids,
             limit=limit,
             proxies=proxies,
-            skip_seller_ids=set(skip_sellers),
+            skip_item_ids=set(skip_items),
             skip_auction_listings=skip_auction_listings,
             on_progress=on_progress,
             parse_count=parse_count,
@@ -116,7 +121,7 @@ async def _run_ricardo(
     keys: list[str],
     limit: int,
     proxies: list[str | None],
-    skip_sellers: set[int],
+    skip_items: set[str],
     *,
     deadline: float | None = None,
 ) -> dict[str, Any]:
@@ -134,7 +139,7 @@ async def _run_ricardo(
             slugs,
             limit=limit,
             proxies=proxies,
-            skip_seller_ids=set(skip_sellers),
+            skip_item_ids=set(skip_items),
             deadline=deadline,
         )
     except RuntimeError as exc:
@@ -163,23 +168,23 @@ async def run_user_parse(
     limit = int(settings["json_limit"])
     parse_count = int(settings.get("parse_count") or 0)
     seen_in_db = 0
-    skip_sellers: set[int] = set()
+    skip_items: set[str] = set()
     if remember_sellers:
-        skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
-        seen_in_db = len(skip_sellers)
+        skip_items = await repo.get_seen_item_ids(user_id, platform)
+        seen_in_db = len(skip_items)
 
     logger.info(
-        "parse user=%s platform=%s limit=%s cats=%s proxies=%s seen=%s",
+        "parse user=%s platform=%s limit=%s cats=%s proxies=%s seen_items=%s",
         user_id,
         platform,
         limit,
         len(keys),
         len(proxies),
-        len(skip_sellers),
+        len(skip_items),
     )
     if platform == PLATFORM_RICARDO:
         result = await _run_ricardo(
-            keys, limit, proxies, skip_sellers, deadline=deadline
+            keys, limit, proxies, skip_items, deadline=deadline
         )
     else:
         result = await _run_2dehands(
@@ -187,7 +192,7 @@ async def run_user_parse(
             keys,
             limit,
             proxies,
-            skip_sellers,
+            skip_items,
             skip_auction_listings=bool(settings.get("filter_skip_bids", True)),
             skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
             on_progress=on_progress,
@@ -197,11 +202,12 @@ async def run_user_parse(
 
     stats = result.setdefault("stats", {})
     stats["proxies_used"] = len(proxies)
-    stats["seen_sellers_before"] = seen_in_db if remember_sellers else 0
+    stats["seen_items_before"] = seen_in_db if remember_sellers else 0
+    stats["seen_sellers_before"] = seen_in_db
     stats["remember_sellers"] = remember_sellers
 
     if remember_sellers:
-        new_sellers = _seller_ids_from_items(result.get("items", []))
-        await repo.add_seen_sellers(user_id, platform, new_sellers)
+        new_items = _item_ids_from_void_items(result.get("items", []))
+        await repo.add_seen_items(user_id, platform, new_items)
     await repo.increment_parse_count(user_id)
     return result

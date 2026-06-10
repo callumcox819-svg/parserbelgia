@@ -40,9 +40,9 @@ def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
         if auctions:
             lines.append(f"Пропущено аукционов (Bieden): **{auctions}**")
         if sellers:
-            lines.append(f"Пропущено (продавец уже был): **{sellers}**")
+            lines.append(f"Пропущено (объявление уже было): **{sellers}**")
     if seen_before:
-        lines.append(f"Продавцов в памяти бота: **{seen_before}**")
+        lines.append(f"Объявлений в памяти бота: **{seen_before}**")
 
     if stats.get("all_filtered") and scanned > 0:
         lines.extend(
@@ -50,10 +50,10 @@ def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
                 "",
                 "✅ **Сайт отвечает** — бот просмотрел объявления, но **все** попали под фильтры:",
                 "• **Bieden** (аукционы) и/или",
-                "• **память продавцов** (уже отдавали в прошлых JSON).",
+                "• **память объявлений** (уже отдавали в прошлых JSON).",
                 "",
                 "**Что сделать:**",
-                "1. **Фильтры → Сбросить память продавцов** (главное при "
+                "1. **Фильтры → Сбросить память объявлений** (главное при "
                 f"**{seen_before}** в памяти),",
                 "2. или выключить «Без Bieden»,",
                 "3. запустить снова (**Прокси → off** для 2dehands).",
@@ -77,7 +77,7 @@ def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
             [
                 "",
                 "**Частые причины:**",
-                "• память продавцов переполнена — **Фильтры → Сбросить память**;",
+                "• память объявлений переполнена — **Фильтры → Сбросить память**;",
                 "• фильтр Bieden отсекает большинство объявлений;",
                 "• CloudFront 403 — **Прокси → off**.",
             ]
@@ -96,11 +96,11 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
             extra += f"\n\n⚠️ {note}"
         sellers_skip = int(stats.get("skipped_sellers") or 0)
         seen_db = int(stats.get("seen_sellers_before") or 0)
-        if stats.get("remember_sellers") and seen_db:
-            extra += (
-                f"\n👤 В памяти бота: **{seen_db}** продавцов "
-                f"(пропущено в этом запуске: **{sellers_skip}**)."
-            )
+            if stats.get("remember_sellers") and seen_db:
+                extra += (
+                    f"\n📋 В памяти бота: **{seen_db}** объявлений "
+                    f"(пропущено в этом запуске: **{sellers_skip}**)."
+                )
         elif sellers_skip:
             extra += f"\n👤 Пропущено из памяти: **{sellers_skip}**."
     if platform == "ricardo" and stats:
@@ -249,11 +249,11 @@ async def run_parser(callback: CallbackQuery) -> None:
     remember = bool(settings.get("filter_remember_sellers", True))
     seen_warn = ""
     if remember:
-        seen_n = len(await repo.get_seen_seller_ids(uid, platform))
+        seen_n = len(await repo.get_seen_item_ids(uid, platform))
         if seen_n > 0:
             seen_warn = (
-                f"\n👤 Память продавцов: **{seen_n}** — ищем только **новых** "
-                "(не повторяем с прошлых запусков)."
+                f"\n📋 Память объявлений: **{seen_n}** — не повторяем старые JSON, "
+                "новые лоты на сайте — ищем."
             )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"

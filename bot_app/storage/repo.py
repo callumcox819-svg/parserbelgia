@@ -235,42 +235,57 @@ async def get_seen_seller_ids(user_id: int, platform: str) -> set[int]:
     return {int(r[0]) for r in rows}
 
 
-async def clear_seen_sellers(user_id: int, platform: str) -> int:
-    """Сброс памяти продавцов. Возвращает число удалённых записей."""
+async def get_seen_item_ids(user_id: int, platform: str) -> set[str]:
     platform = normalize_platform(platform)
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             """
-            SELECT COUNT(*) FROM user_seen_sellers
+            SELECT item_id FROM user_seen_items
             WHERE user_id = ? AND platform = ?
             """,
             (user_id, platform),
         ) as cur:
-            n = int((await cur.fetchone())[0])
-        await db.execute(
+            rows = await cur.fetchall()
+    return {str(r[0]) for r in rows if r[0]}
+
+
+async def clear_seen_sellers(user_id: int, platform: str) -> int:
+    """Сброс памяти объявлений (и устаревшей памяти продавцов)."""
+    platform = normalize_platform(platform)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
             """
-            DELETE FROM user_seen_sellers
+            SELECT COUNT(*) FROM user_seen_items
             WHERE user_id = ? AND platform = ?
             """,
             (user_id, platform),
+        ) as cur:
+            n_items = int((await cur.fetchone())[0])
+        await db.execute(
+            "DELETE FROM user_seen_items WHERE user_id = ? AND platform = ?",
+            (user_id, platform),
+        )
+        await db.execute(
+            "DELETE FROM user_seen_sellers WHERE user_id = ? AND platform = ?",
+            (user_id, platform),
         )
         await db.commit()
-    return n
+    return n_items
 
 
-async def add_seen_sellers(
-    user_id: int, platform: str, seller_ids: set[int]
+async def add_seen_items(
+    user_id: int, platform: str, item_ids: set[str]
 ) -> None:
-    if not seller_ids:
+    if not item_ids:
         return
     platform = normalize_platform(platform)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executemany(
             """
-            INSERT OR IGNORE INTO user_seen_sellers (user_id, platform, seller_id)
+            INSERT OR IGNORE INTO user_seen_items (user_id, platform, item_id)
             VALUES (?, ?, ?)
             """,
-            [(user_id, platform, sid) for sid in seller_ids],
+            [(user_id, platform, iid) for iid in item_ids if iid],
         )
         await db.commit()
 

@@ -23,7 +23,7 @@ def filters_keyboard(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="🗑 Сбросить память продавцов",
+                        text="🗑 Сбросить память объявлений",
                         callback_data=CB_FILTER_CLEAR_SELLERS,
                     )
                 ],
@@ -49,13 +49,13 @@ def filters_keyboard(
             ],
             [
                 InlineKeyboardButton(
-                    text=f"{mem_mark} Не повторять продавцов",
+                    text=f"{mem_mark} Не повторять объявления",
                     callback_data=CB_FILTER_REMEMBER_SELLERS,
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🗑 Сбросить память продавцов",
+                    text="🗑 Сбросить память объявлений",
                     callback_data=CB_FILTER_CLEAR_SELLERS,
                 )
             ],

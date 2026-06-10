@@ -59,7 +59,7 @@ def _sort_for_run(parse_count: int, cat_index: int) -> tuple[str, str]:
 
 
 def _start_offset(parse_count: int, cat_index: int, skip_count: int) -> int:
-    """С большой памятью продавцов не начинаем с offset=0 — там только «старые»."""
+    """С большой памятью объявлений не начинаем с offset=0 — там только «старые»."""
     if skip_count < 500:
         return 0
     depth = min(skip_count // 20, 4000)
@@ -123,7 +123,7 @@ async def parse_l1_categories(
     limit: int,
     proxy: str | None = None,
     proxies: list[str | None] | None = None,
-    skip_seller_ids: set[int] | None = None,
+    skip_item_ids: set[str] | None = None,
     skip_auction_listings: bool = False,
     on_progress: ProgressFn = None,
     parse_count: int = 0,
@@ -138,11 +138,11 @@ async def parse_l1_categories(
     if not proxy_list:
         proxy_list = [None]
 
-    skip = set(skip_seller_ids) if skip_seller_ids else set()
+    skip = set(skip_item_ids) if skip_item_ids else set()
     items: list[dict[str, Any]] = []
     seen_items: set[str] = set()
     skipped_auctions = 0
-    skipped_sellers = 0
+    skipped_items = 0
     pages_fetched = 0
     listings_scanned = 0
     partial_reason: str | None = None
@@ -162,7 +162,7 @@ async def parse_l1_categories(
                 "pages_fetched": pages_fetched,
                 "listings_scanned": listings_scanned,
                 "skipped_auctions": skipped_auctions,
-                "skipped_sellers": skipped_sellers,
+                "skipped_items": skipped_items,
             }
         )
 
@@ -286,37 +286,33 @@ async def parse_l1_categories(
 
                 listings_scanned += len(listings)
                 page_non_auction = 0
-                page_seller_skips = 0
+                page_item_skips = 0
                 for listing in listings:
                     if skip_auction_listings and listing_is_auction(listing):
                         skipped_auctions += 1
                         continue
 
                     page_non_auction += 1
-                    item_id = listing.get("itemId")
-                    if item_id and item_id in seen_items:
+                    item_id = str(listing.get("itemId") or "")
+                    if not item_id:
+                        continue
+                    if item_id in seen_items:
+                        continue
+                    if item_id in skip:
+                        skipped_items += 1
+                        page_item_skips += 1
                         continue
 
-                    seller = listing.get("sellerInformation") or {}
-                    seller_id = seller.get("sellerId")
-                    if seller_id and int(seller_id) in skip:
-                        skipped_sellers += 1
-                        page_seller_skips += 1
-                        continue
-
-                    if item_id:
-                        seen_items.add(item_id)
+                    seen_items.add(item_id)
                     void_item = listing_to_void_item(listing)
                     if skip_auction_listings and void_item_is_auction_price(
                         str(void_item.get("item_price") or "")
                     ):
                         skipped_auctions += 1
-                        if item_id:
-                            seen_items.discard(item_id)
+                        seen_items.discard(item_id)
                         continue
                     items.append(void_item)
-                    if seller_id:
-                        skip.add(int(seller_id))
+                    skip.add(item_id)
 
                     if len(items) >= limit:
                         break
@@ -330,8 +326,8 @@ async def parse_l1_categories(
                 elif page_non_auction == 0:
                     # Страница только Bieden — листаем дальше.
                     pass
-                elif page_seller_skips > 0:
-                    # Память продавцов — листаем глубже, не уходим из категории.
+                elif page_item_skips > 0:
+                    # Память объявлений — листаем глубже, не уходим из категории.
                     pass
                 else:
                     stale_pages += 1
@@ -364,7 +360,8 @@ async def parse_l1_categories(
 
     stats: dict[str, Any] = {
         "skipped_auctions": skipped_auctions,
-        "skipped_sellers": skipped_sellers,
+        "skipped_items": skipped_items,
+        "skipped_sellers": skipped_items,
         "pages_fetched": pages_fetched,
         "listings_scanned": listings_scanned,
     }
@@ -392,15 +389,15 @@ async def parse_l1_categories(
     elif len(items) < limit and skip_at_start > limit * 5 and items:
         stats["note"] = (
             f"Собрано **{len(items)}** из **{limit}**. "
-            f"Память **{skip_at_start}** продавцов — бот листал глубже, но новых мало. "
+            f"Память **{skip_at_start}** объявлений — бот листал глубже, но новых мало. "
             "**Фильтры → Сбросить память** если нужен полный лимит снова."
         )
     elif len(items) < limit and not items:
         stats["note"] = (
-            "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."
+            "Пусто — сбросьте память объявлений (Фильтры) или отключите фильтр Bieden."
         )
     if not items and listings_scanned > 0:
-        filtered = skipped_auctions + skipped_sellers
+        filtered = skipped_auctions + skipped_items
         if filtered >= int(listings_scanned * 0.85):
             stats["all_filtered"] = True
     if not items and had_403 and pages_fetched < 5:

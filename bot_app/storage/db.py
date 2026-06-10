@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS user_seen_sellers (
     PRIMARY KEY (user_id, platform, seller_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_seen_items (
+    user_id INTEGER NOT NULL,
+    platform TEXT NOT NULL DEFAULT '2dehands',
+    item_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, platform, item_id)
+);
+
 CREATE TABLE IF NOT EXISTS category_id_cache (
     platform TEXT NOT NULL DEFAULT '2dehands',
     category_key TEXT NOT NULL,
@@ -128,6 +135,19 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
     if user_cols and "filter_remember_sellers" not in user_cols:
         await db.execute(
             "ALTER TABLE users ADD COLUMN filter_remember_sellers INTEGER NOT NULL DEFAULT 1"
+        )
+
+    item_cols = await _table_columns(db, "user_seen_items")
+    if not item_cols:
+        await db.execute(
+            """
+            CREATE TABLE user_seen_items (
+                user_id INTEGER NOT NULL,
+                platform TEXT NOT NULL DEFAULT '2dehands',
+                item_id TEXT NOT NULL,
+                PRIMARY KEY (user_id, platform, item_id)
+            )
+            """
         )
 
     if cache_cols and "platform" not in cache_cols:

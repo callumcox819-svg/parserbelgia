@@ -170,7 +170,7 @@ async def parse_ricardo_categories(
     limit: int,
     proxy: str | None = None,
     proxies: list[str | None] | None = None,
-    skip_seller_ids: set[int] | None = None,
+    skip_item_ids: set[str] | None = None,
     deadline: float | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
@@ -179,7 +179,7 @@ async def parse_ricardo_categories(
         raise ValueError("Нужна хотя бы одна категория")
 
     proxy_list = _normalize_proxies(proxy, proxies)
-    skip = set(skip_seller_ids) if skip_seller_ids else set()
+    skip = set(skip_item_ids) if skip_item_ids else set()
     raw_articles: list[dict[str, Any]] = []
     seen_items: set[str] = set()
     skipped_404: list[str] = []
@@ -250,18 +250,13 @@ async def parse_ricardo_categories(
                     if not aid or aid in seen_items:
                         continue
 
-                    seller_raw = str(article.get("seller_id") or "").strip()
-                    seller_id: int | None = None
-                    if seller_raw.isdigit():
-                        seller_id = int(seller_raw)
-                        if seller_id in skip:
-                            continue
+                    if aid in skip:
+                        continue
 
                     seen_items.add(aid)
                     article["_category_url"] = url
                     raw_articles.append(article)
-                    if seller_id is not None:
-                        skip.add(seller_id)
+                    skip.add(aid)
                     added += 1
                     if len(raw_articles) >= limit:
                         break
