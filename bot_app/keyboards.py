@@ -15,7 +15,7 @@ def filters_keyboard(
     *,
     skip_bids: bool,
     skip_vehicles: bool,
-    remember_sellers: bool = False,
+    remember_sellers: bool = True,
     platform: str,
 ) -> InlineKeyboardMarkup:
     if platform != PLATFORM_2DEHANDS:

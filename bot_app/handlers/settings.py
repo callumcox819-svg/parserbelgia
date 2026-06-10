@@ -199,8 +199,8 @@ async def open_filters(callback: CallbackQuery) -> None:
         "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
         "**Без авто / броммеров** — не парсить категории:\n"
         "🚗 Авто, 🔧 Автозапчасти, 🚲 Вело и мопеды.\n\n"
-        "**Не повторять продавцов** — бот не отдаёт одного продавца дважды "
-        "(между запусками). Если мало объявлений — выключите или "
+        "**Не повторять продавцов** — каждый запуск ищет **новых** продавцов "
+        "(старые из прошлых JSON не попадут снова). Если мало объявлений — "
         "«Сбросить память».\n\n"
         "Вкл/выкл кнопками ниже."
     )
@@ -215,7 +215,7 @@ async def open_filters(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", False)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
         parse_mode="Markdown",
@@ -233,7 +233,7 @@ async def toggle_skip_bids(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", False)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
     )
@@ -259,7 +259,7 @@ async def toggle_skip_vehicles(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", False)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
     )
@@ -277,11 +277,11 @@ async def toggle_remember_sellers(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", False)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
     )
-    state = "включено" if s.get("filter_remember_sellers", False) else "выключено"
+    state = "включено" if s.get("filter_remember_sellers", True) else "выключено"
     await callback.answer(f"Не повторять продавцов: {state}")
 
 

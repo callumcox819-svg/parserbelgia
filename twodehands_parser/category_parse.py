@@ -251,7 +251,12 @@ async def parse_l1_categories(
                     pass
                 else:
                     stale_pages += 1
-                stale_limit = 15 if len(skip) < limit else 5
+                if len(skip) > limit * 10:
+                    stale_limit = 25
+                elif len(skip) > limit * 3:
+                    stale_limit = 15
+                else:
+                    stale_limit = 8
                 if stale_pages >= stale_limit:
                     logger.info(
                         "2dehands cat=%s no new items for %s pages at offset=%s, next category",

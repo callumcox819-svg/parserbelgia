@@ -151,23 +151,13 @@ async def run_user_parse(
         raise ValueError("Включите хотя бы одну категорию в настройках.")
 
     proxies = resolve_user_proxies(settings)
-    remember_sellers = bool(settings.get("filter_remember_sellers", False))
+    remember_sellers = bool(settings.get("filter_remember_sellers", True))
     limit = int(settings["json_limit"])
-    skip_sellers: set[int] = set()
-    seller_memory_bypassed = False
     seen_in_db = 0
+    skip_sellers: set[int] = set()
     if remember_sellers:
-        seen_in_db = len(await repo.get_seen_seller_ids(user_id, platform))
-        if seen_in_db > limit * 3:
-            seller_memory_bypassed = True
-            logger.info(
-                "seller memory bypass user=%s seen=%s limit=%s",
-                user_id,
-                seen_in_db,
-                limit,
-            )
-        else:
-            skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
+        skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
+        seen_in_db = len(skip_sellers)
 
     logger.info(
         "parse user=%s platform=%s limit=%s cats=%s proxies=%s seen=%s",
@@ -196,9 +186,8 @@ async def run_user_parse(
     stats["proxies_used"] = len(proxies)
     stats["seen_sellers_before"] = seen_in_db if remember_sellers else 0
     stats["remember_sellers"] = remember_sellers
-    stats["seller_memory_bypassed"] = seller_memory_bypassed
 
-    if remember_sellers and not seller_memory_bypassed:
+    if remember_sellers:
         new_sellers = _seller_ids_from_items(result.get("items", []))
         await repo.add_seen_sellers(user_id, platform, new_sellers)
     await repo.increment_parse_count(user_id)
