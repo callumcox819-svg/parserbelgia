@@ -62,8 +62,8 @@ def _start_offset(parse_count: int, cat_index: int, skip_count: int) -> int:
     """С большой памятью продавцов не начинаем с offset=0 — там только «старые»."""
     if skip_count < 500:
         return 0
-    depth = min(skip_count // 15, 5000)
-    rot = (parse_count * 90 + cat_index * 120) % 1500
+    depth = min(skip_count // 20, 4000)
+    rot = (parse_count * 200 + cat_index * 350) % 2500
     off = depth + rot
     return (off // 30) * 30
 
@@ -199,6 +199,7 @@ async def parse_l1_categories(
             offset = _start_offset(parse_count, cat_index, skip_at_start)
             stale_pages = 0
             retried_from_zero = offset == 0
+            retried_after_403 = False
             if offset > 0:
                 logger.info(
                     "2dehands cat=%s start offset=%s sort=%s/%s seen=%s",
@@ -236,6 +237,18 @@ async def parse_l1_categories(
                     err = str(exc)
                     if "403" in err:
                         had_403 = True
+                        if offset > 0 and not retried_after_403:
+                            logger.info(
+                                "2dehands 403 cat=%s offset=%s, retry from 0",
+                                cat_id,
+                                offset,
+                            )
+                            offset = 0
+                            retried_after_403 = True
+                            retried_from_zero = True
+                            stale_pages = 0
+                            await asyncio.sleep(2.0)
+                            continue
                         logger.warning(
                             "2dehands 403 cat=%s offset=%s items=%s, next category",
                             cat_id,
@@ -386,4 +399,10 @@ async def parse_l1_categories(
         stats["note"] = (
             "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."
         )
+    if not items and listings_scanned > 0:
+        filtered = skipped_auctions + skipped_sellers
+        if filtered >= int(listings_scanned * 0.85):
+            stats["all_filtered"] = True
+    if not items and had_403 and pages_fetched < 5:
+        stats["blocked_403"] = True
     return {"items": items, "stats": stats}

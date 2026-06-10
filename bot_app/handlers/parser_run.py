@@ -25,12 +25,15 @@ PARSE_TIMEOUT_SEC = float(os.environ.get("PARSE_TIMEOUT_SEC", "900"))
 
 
 def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
+    scanned = int(stats.get("listings_scanned") or 0)
     lines = [
         "📭 **Ничего не найдено**",
         "",
         f"Просмотрено страниц API: **{stats.get('pages_fetched', 0)}**",
-        f"Листингов на страницах: **{stats.get('listings_scanned', 0)}**",
+        f"Листингов на страницах: **{scanned}**",
     ]
+    auctions = 0
+    sellers = 0
     if platform == "2dehands":
         auctions = int(stats.get("skipped_auctions") or 0)
         sellers = int(stats.get("skipped_sellers") or 0)
@@ -40,21 +43,45 @@ def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
             lines.append(f"Пропущено (продавец уже был): **{sellers}**")
     if seen_before:
         lines.append(f"Продавцов в памяти бота: **{seen_before}**")
-    if stats.get("timed_out"):
+
+    if stats.get("all_filtered") and scanned > 0:
+        lines.extend(
+            [
+                "",
+                "✅ **Сайт отвечает** — бот просмотрел объявления, но **все** попали под фильтры:",
+                "• **Bieden** (аукционы) и/или",
+                "• **память продавцов** (уже отдавали в прошлых JSON).",
+                "",
+                "**Что сделать:**",
+                "1. **Фильтры → Сбросить память продавцов** (главное при "
+                f"**{seen_before}** в памяти),",
+                "2. или выключить «Без Bieden»,",
+                "3. запустить снова (**Прокси → off** для 2dehands).",
+            ]
+        )
+    elif stats.get("blocked_403"):
+        lines.extend(
+            [
+                "",
+                "🚫 **CloudFront 403** — IP заблокирован с первых запросов.",
+                "**Прокси → off**, подождите 3–5 мин, снова «Запустить парсер».",
+            ]
+        )
+    elif stats.get("timed_out"):
         lines.append(
             f"\n⏱ Лимит времени (**{int(PARSE_TIMEOUT_SEC // 60)} мин**) — "
             "новых объявлений не найдено."
         )
-    lines.extend(
-        [
-            "",
-            "**Частые причины:**",
-            "• прокси не той страны (2dehands → BE, Ricardo → CH);",
-            "• все подходящие продавцы уже в памяти — сбросьте в Фильтры;",
-            "• фильтр Bieden отсекает большинство объявлений;",
-            "• CloudFront 403 — смените прокси или снизьте лимит.",
-        ]
-    )
+    else:
+        lines.extend(
+            [
+                "",
+                "**Частые причины:**",
+                "• память продавцов переполнена — **Фильтры → Сбросить память**;",
+                "• фильтр Bieden отсекает большинство объявлений;",
+                "• CloudFront 403 — **Прокси → off**.",
+            ]
+        )
     return "\n".join(lines)
 
 
