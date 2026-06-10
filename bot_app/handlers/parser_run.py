@@ -252,8 +252,8 @@ async def run_parser(callback: CallbackQuery) -> None:
         seen_n = len(await repo.get_seen_seller_ids(uid, platform))
         if seen_n > 0:
             seen_warn = (
-                f"\n👤 Память: **{seen_n}** продавцов — ищем **новых** "
-                "(сортировка по дате, с начала ленты)."
+                f"\n👤 Память: **{seen_n}** продавцов — свежие → конец ленты → "
+                "снова с начала, если мало новых."
             )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"

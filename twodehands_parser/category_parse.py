@@ -51,10 +51,25 @@ def _http_error(status: int, raw: str, proxy: str | None) -> RuntimeError:
 
 
 def _sort_for_run(parse_count: int, cat_index: int) -> tuple[str, str]:
-    """Новые лоты и продавцы — в начале ленты по дате (DATE ↓)."""
-    if (parse_count + cat_index) % 4 == 3:
-        return ("SORT_INDEX", "DECREASING")
+    """Всегда свежие объявления первыми."""
+    del parse_count, cat_index
     return ("DATE", "DECREASING")
+
+
+def _fresh_sweeps_max() -> int:
+    raw = os.environ.get("PARSE_FRESH_SWEEPS", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def _category_rounds_max() -> int:
+    raw = os.environ.get("PARSE_CATEGORY_ROUNDS", "2")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 2
 
 
 class _ProxySessions:
@@ -164,169 +179,215 @@ async def parse_l1_categories(
     )
     pool = _ProxySessions(proxy_list)
     skip_at_start = len(skip)
+    fresh_rescans = 0
+    sweeps_max = _fresh_sweeps_max()
+    rounds_max = _category_rounds_max()
     try:
-        for cat_index, cat_id in enumerate(category_ids):
+        for cat_round in range(rounds_max):
             if timed_out or len(items) >= limit:
                 break
-            if _past_deadline():
-                timed_out = True
+            if cat_round > 0:
                 logger.info(
-                    "2dehands deadline cat=%s items=%s, stop",
-                    cat_id,
+                    "2dehands category round %s/%s items=%s",
+                    cat_round + 1,
+                    rounds_max,
                     len(items),
                 )
-                break
-
-            sort_by, sort_order = _sort_for_run(parse_count, cat_index)
-            base_params: dict[str, str | list[str]] = {
-                "l1CategoryId": str(cat_id),
-                "viewOptions": "list-view",
-                "sortBy": sort_by,
-                "sortOrder": sort_order,
-                "attributesByKey[]": ["Language:all-languages"],
-            }
-            offset = 0
-            stale_pages = 0
-            retried_after_403 = False
-            logger.info(
-                "2dehands cat=%s sort=%s/%s seen_sellers=%s",
-                cat_id,
-                sort_by,
-                sort_order,
-                skip_at_start,
-            )
-
-            while len(items) < limit:
+            for cat_index, cat_id in enumerate(category_ids):
+                if timed_out or len(items) >= limit:
+                    break
                 if _past_deadline():
                     timed_out = True
                     logger.info(
-                        "2dehands deadline mid-cat=%s items=%s, stop",
+                        "2dehands deadline cat=%s items=%s, stop",
                         cat_id,
                         len(items),
                     )
                     break
-                items_before_page = len(items)
-                page_limit = page_request_limit(limit - len(items))
-                await _throttle()
-                api_url = api_url_from_params(
-                    base_params, limit=page_limit, offset=offset
-                )
-                logger.info(
-                    "2dehands fetch cat=%s offset=%s items=%s",
-                    cat_id,
-                    offset,
-                    len(items),
-                )
-                try:
-                    data = await pool.fetch(api_url)
-                except RuntimeError as exc:
-                    err = str(exc)
-                    if "403" in err:
-                        had_403 = True
-                        if offset > 0 and not retried_after_403:
+
+                sort_by, sort_order = _sort_for_run(parse_count, cat_index)
+                base_params: dict[str, str | list[str]] = {
+                    "l1CategoryId": str(cat_id),
+                    "viewOptions": "list-view",
+                    "sortBy": sort_by,
+                    "sortOrder": sort_order,
+                    "attributesByKey[]": ["Language:all-languages"],
+                }
+
+                for fresh_sweep in range(sweeps_max):
+                    if timed_out or len(items) >= limit:
+                        break
+                    if fresh_sweep > 0:
+                        fresh_rescans += 1
+                        logger.info(
+                            "2dehands cat=%s rescan fresh sweep=%s/%s items=%s",
+                            cat_id,
+                            fresh_sweep + 1,
+                            sweeps_max,
+                            len(items),
+                        )
+                        await asyncio.sleep(1.0)
+
+                    offset = 0
+                    stale_pages = 0
+                    retried_after_403 = False
+                    sweep_exhausted = False
+                    if fresh_sweep == 0:
+                        logger.info(
+                            "2dehands cat=%s sort=%s/%s seen_sellers=%s",
+                            cat_id,
+                            sort_by,
+                            sort_order,
+                            skip_at_start,
+                        )
+
+                    while len(items) < limit:
+                        if _past_deadline():
+                            timed_out = True
                             logger.info(
-                                "2dehands 403 cat=%s offset=%s, retry from 0",
+                                "2dehands deadline mid-cat=%s items=%s, stop",
                                 cat_id,
+                                len(items),
+                            )
+                            break
+                        items_before_page = len(items)
+                        page_limit = page_request_limit(limit - len(items))
+                        await _throttle()
+                        api_url = api_url_from_params(
+                            base_params, limit=page_limit, offset=offset
+                        )
+                        logger.info(
+                            "2dehands fetch cat=%s offset=%s items=%s sweep=%s",
+                            cat_id,
+                            offset,
+                            len(items),
+                            fresh_sweep + 1,
+                        )
+                        try:
+                            data = await pool.fetch(api_url)
+                        except RuntimeError as exc:
+                            err = str(exc)
+                            if "403" in err:
+                                had_403 = True
+                                if offset > 0 and not retried_after_403:
+                                    logger.info(
+                                        "2dehands 403 cat=%s offset=%s, retry from 0",
+                                        cat_id,
+                                        offset,
+                                    )
+                                    offset = 0
+                                    retried_after_403 = True
+                                    stale_pages = 0
+                                    await asyncio.sleep(2.0)
+                                    continue
+                                logger.warning(
+                                    "2dehands 403 cat=%s offset=%s items=%s, next category",
+                                    cat_id,
+                                    offset,
+                                    len(items),
+                                )
+                                break
+                            if "400" in err:
+                                had_400 = True
+                                logger.warning(
+                                    "2dehands 400 cat=%s offset=%s limit=%s items=%s, next category",
+                                    cat_id,
+                                    offset,
+                                    page_limit,
+                                    len(items),
+                                )
+                                break
+                            raise
+
+                        listings = data.get("listings") or []
+                        pages_fetched += 1
+                        await _report()
+                        if not listings:
+                            if offset == 0:
+                                sweep_exhausted = True
+                            break
+
+                        listings_scanned += len(listings)
+                        page_non_auction = 0
+                        page_seller_skips = 0
+                        for listing in listings:
+                            if skip_auction_listings and listing_is_auction(listing):
+                                skipped_auctions += 1
+                                continue
+
+                            page_non_auction += 1
+                            item_id = listing.get("itemId")
+                            if item_id and item_id in seen_items:
+                                continue
+
+                            seller = listing.get("sellerInformation") or {}
+                            seller_id = seller.get("sellerId")
+                            if seller_id and int(seller_id) in skip:
+                                skipped_sellers += 1
+                                page_seller_skips += 1
+                                continue
+
+                            if item_id:
+                                seen_items.add(item_id)
+                            void_item = listing_to_void_item(listing)
+                            if skip_auction_listings and void_item_is_auction_price(
+                                str(void_item.get("item_price") or "")
+                            ):
+                                skipped_auctions += 1
+                                if item_id:
+                                    seen_items.discard(item_id)
+                                continue
+                            items.append(void_item)
+                            if seller_id:
+                                skip.add(int(seller_id))
+
+                            if len(items) >= limit:
+                                break
+
+                        if len(items) >= limit:
+                            break
+
+                        added = len(items) - items_before_page
+                        if added > 0:
+                            stale_pages = 0
+                        elif page_non_auction == 0:
+                            pass
+                        elif page_seller_skips > 0:
+                            pass
+                        else:
+                            stale_pages += 1
+                        stale_limit = 60 if skip_at_start > limit * 3 else 20
+                        if stale_pages >= stale_limit:
+                            logger.info(
+                                "2dehands cat=%s stale %s pages offset=%s, end sweep",
+                                cat_id,
+                                stale_pages,
                                 offset,
                             )
-                            offset = 0
-                            retried_after_403 = True
-                            stale_pages = 0
-                            await asyncio.sleep(2.0)
-                            continue
-                        logger.warning(
-                            "2dehands 403 cat=%s offset=%s items=%s, next category",
-                            cat_id,
-                            offset,
-                            len(items),
-                        )
-                        break
-                    if "400" in err:
-                        had_400 = True
-                        logger.warning(
-                            "2dehands 400 cat=%s offset=%s limit=%s items=%s, next category",
-                            cat_id,
-                            offset,
-                            page_limit,
-                            len(items),
-                        )
-                        break
-                    raise
+                            sweep_exhausted = True
+                            break
 
-                listings = data.get("listings") or []
-                pages_fetched += 1
-                await _report()
-                if not listings:
-                    break
-
-                listings_scanned += len(listings)
-                page_non_auction = 0
-                page_seller_skips = 0
-                for listing in listings:
-                    if skip_auction_listings and listing_is_auction(listing):
-                        skipped_auctions += 1
-                        continue
-
-                    page_non_auction += 1
-                    item_id = listing.get("itemId")
-                    if item_id and item_id in seen_items:
-                        continue
-
-                    seller = listing.get("sellerInformation") or {}
-                    seller_id = seller.get("sellerId")
-                    if seller_id and int(seller_id) in skip:
-                        skipped_sellers += 1
-                        page_seller_skips += 1
-                        continue
-
-                    if item_id:
-                        seen_items.add(item_id)
-                    void_item = listing_to_void_item(listing)
-                    if skip_auction_listings and void_item_is_auction_price(
-                        str(void_item.get("item_price") or "")
-                    ):
-                        skipped_auctions += 1
-                        if item_id:
-                            seen_items.discard(item_id)
-                        continue
-                    items.append(void_item)
-                    if seller_id:
-                        skip.add(int(seller_id))
+                        total = int(data.get("totalResultCount") or 0)
+                        offset += page_limit
+                        if offset >= total:
+                            sweep_exhausted = True
+                            logger.info(
+                                "2dehands cat=%s end of catalog offset=%s total=%s",
+                                cat_id,
+                                offset,
+                                total,
+                            )
+                            break
 
                     if len(items) >= limit:
                         break
+                    if not sweep_exhausted:
+                        break
+                    if fresh_sweep + 1 >= sweeps_max:
+                        break
 
-                if len(items) >= limit:
+                if timed_out or len(items) >= limit:
                     break
-
-                added = len(items) - items_before_page
-                if added > 0:
-                    stale_pages = 0
-                elif page_non_auction == 0:
-                    # Страница только Bieden — листаем дальше.
-                    pass
-                elif page_seller_skips > 0:
-                    # Старые продавцы на странице — листаем дальше (ищем новых).
-                    pass
-                else:
-                    stale_pages += 1
-                stale_limit = 60 if skip_at_start > limit * 3 else 20
-                if stale_pages >= stale_limit:
-                    logger.info(
-                        "2dehands cat=%s no new items for %s pages at offset=%s, next category",
-                        cat_id,
-                        stale_pages,
-                        offset,
-                    )
-                    break
-
-                total = int(data.get("totalResultCount") or 0)
-                offset += page_limit
-                if offset >= total:
-                    break
-
-            if timed_out or len(items) >= limit:
-                break
     finally:
         await pool.close()
 
@@ -342,6 +403,7 @@ async def parse_l1_categories(
         "skipped_sellers": skipped_sellers,
         "pages_fetched": pages_fetched,
         "listings_scanned": listings_scanned,
+        "fresh_rescans": fresh_rescans,
     }
     if len(items) < limit and items:
         stats["shortfall"] = True
