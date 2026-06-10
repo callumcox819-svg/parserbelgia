@@ -96,11 +96,11 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
             extra += f"\n\n⚠️ {note}"
         sellers_skip = int(stats.get("skipped_sellers") or 0)
         seen_db = int(stats.get("seen_sellers_before") or 0)
-            if stats.get("remember_sellers") and seen_db:
-                extra += (
-                    f"\n👤 В памяти бота: **{seen_db}** продавцов "
-                    f"(пропущено в этом запуске: **{sellers_skip}**)."
-                )
+        if stats.get("remember_sellers") and seen_db:
+            extra += (
+                f"\n👤 В памяти бота: **{seen_db}** продавцов "
+                f"(пропущено в этом запуске: **{sellers_skip}**)."
+            )
         elif sellers_skip:
             extra += f"\n👤 Пропущено из памяти: **{sellers_skip}**."
     if platform == "ricardo" and stats:
