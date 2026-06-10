@@ -78,6 +78,7 @@ async def _run_2dehands(
     skip_vehicle_categories: bool = False,
     on_progress: ProgressFn = None,
     parse_count: int = 0,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     if skip_vehicle_categories:
         keys = [k for k in keys if k not in VEHICLE_CATEGORY_KEYS]
@@ -102,6 +103,7 @@ async def _run_2dehands(
             skip_auction_listings=skip_auction_listings,
             on_progress=on_progress,
             parse_count=parse_count,
+            deadline=deadline,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc):
@@ -115,6 +117,8 @@ async def _run_ricardo(
     limit: int,
     proxies: list[str | None],
     skip_sellers: set[int],
+    *,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     slugs: list[str] = []
     for key in keys:
@@ -131,6 +135,7 @@ async def _run_ricardo(
             limit=limit,
             proxies=proxies,
             skip_seller_ids=set(skip_sellers),
+            deadline=deadline,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc) and "Cloudflare" not in str(
@@ -145,6 +150,7 @@ async def run_user_parse(
     user_id: int,
     *,
     on_progress: ProgressFn = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     settings = await repo.get_user_settings(user_id)
     platform = normalize_platform(settings.get("platform"))
@@ -172,7 +178,9 @@ async def run_user_parse(
         len(skip_sellers),
     )
     if platform == PLATFORM_RICARDO:
-        result = await _run_ricardo(keys, limit, proxies, skip_sellers)
+        result = await _run_ricardo(
+            keys, limit, proxies, skip_sellers, deadline=deadline
+        )
     else:
         result = await _run_2dehands(
             user_id,
@@ -184,6 +192,7 @@ async def run_user_parse(
             skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
             on_progress=on_progress,
             parse_count=parse_count,
+            deadline=deadline,
         )
 
     stats = result.setdefault("stats", {})

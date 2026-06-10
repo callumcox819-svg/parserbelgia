@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -126,6 +127,7 @@ async def parse_l1_categories(
     skip_auction_listings: bool = False,
     on_progress: ProgressFn = None,
     parse_count: int = 0,
+    deadline: float | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -146,6 +148,10 @@ async def parse_l1_categories(
     partial_reason: str | None = None
     had_403 = False
     had_400 = False
+    timed_out = False
+
+    def _past_deadline() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
 
     async def _report() -> None:
         if not on_progress:
@@ -171,7 +177,15 @@ async def parse_l1_categories(
     skip_at_start = len(skip)
     try:
         for cat_index, cat_id in enumerate(category_ids):
-            if len(items) >= limit:
+            if timed_out or len(items) >= limit:
+                break
+            if _past_deadline():
+                timed_out = True
+                logger.info(
+                    "2dehands deadline cat=%s items=%s, stop",
+                    cat_id,
+                    len(items),
+                )
                 break
 
             sort_by, sort_order = _sort_for_run(parse_count, cat_index)
@@ -196,6 +210,14 @@ async def parse_l1_categories(
                 )
 
             while len(items) < limit:
+                if _past_deadline():
+                    timed_out = True
+                    logger.info(
+                        "2dehands deadline mid-cat=%s items=%s, stop",
+                        cat_id,
+                        len(items),
+                    )
+                    break
                 items_before_page = len(items)
                 page_limit = page_request_limit(limit - len(items))
                 await _throttle()
@@ -315,12 +337,14 @@ async def parse_l1_categories(
                 if offset >= total:
                     break
 
-            if len(items) >= limit:
+            if timed_out or len(items) >= limit:
                 break
     finally:
         await pool.close()
 
-    if had_403 and len(items) < limit:
+    if timed_out and len(items) < limit:
+        partial_reason = "timeout"
+    elif had_403 and len(items) < limit:
         partial_reason = "403"
     elif had_400 and len(items) < limit:
         partial_reason = "400"
@@ -333,10 +357,16 @@ async def parse_l1_categories(
     }
     if len(items) < limit and items:
         stats["shortfall"] = True
-    if partial_reason in ("403", "400") and items:
+    if partial_reason in ("403", "400", "timeout") and items:
         stats["partial"] = True
         stats["partial_reason"] = partial_reason
-        if partial_reason == "403":
+        if partial_reason == "timeout":
+            stats["timed_out"] = True
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}** — **лимит времени**. "
+                "Отдан частичный JSON."
+            )
+        elif partial_reason == "403":
             stats["note"] = (
                 f"Собрано **{len(items)}** из **{limit}**. CloudFront **403** — "
                 "поставьте **Прокси → off**, подождите 2–3 мин и повторите."

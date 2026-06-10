@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from typing import Any
 
 from .article_detail import article_page_url, parse_article_page_html
@@ -170,6 +171,7 @@ async def parse_ricardo_categories(
     proxy: str | None = None,
     proxies: list[str | None] | None = None,
     skip_seller_ids: set[int] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -187,6 +189,10 @@ async def parse_ricardo_categories(
     enrich_calls = 0
     data_source = "unknown"
     referer = f"{BASE}/{LANG}/"
+    timed_out = False
+
+    def _past_deadline() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
 
     if not enrich:
         logger.info(
@@ -197,13 +203,19 @@ async def parse_ricardo_categories(
 
     async with proxy_pool(proxy_list) as pool:
         for slug in category_slugs:
-            if len(raw_articles) >= limit:
+            if timed_out or len(raw_articles) >= limit:
+                break
+            if _past_deadline():
+                timed_out = True
                 break
 
             page = 1
             empty_streak = 0
             category_failed = False
             while len(raw_articles) < limit and page <= MAX_PAGES_PER_CATEGORY:
+                if _past_deadline():
+                    timed_out = True
+                    break
                 url = category_page_url(slug, page)
                 html, status, used_proxy = await _fetch_html(
                     pool, url, referer=referer, enrich=False
@@ -260,6 +272,9 @@ async def parse_ricardo_categories(
                     break
                 page += 1
 
+            if timed_out:
+                break
+
             if category_failed:
                 continue
 
@@ -304,15 +319,20 @@ async def parse_ricardo_categories(
         for a, item in zip(raw_articles[:limit], items)
         if (item.get("item_photo") or item.get("item_price"))
     )
-    return {
-        "items": items,
-        "stats": {
-            "total": len(items),
-            "enriched": enriched,
-            "proxies": len(proxy_list),
-            "pages": pages_fetched,
-            "enrich_calls": enrich_calls,
-            "fast_mode": not enrich,
-            "data_source": data_source,
-        },
+    stats: dict[str, Any] = {
+        "total": len(items),
+        "enriched": enriched,
+        "proxies": len(proxy_list),
+        "pages": pages_fetched,
+        "enrich_calls": enrich_calls,
+        "fast_mode": not enrich,
+        "data_source": data_source,
     }
+    if timed_out and len(items) < limit:
+        stats["timed_out"] = True
+        stats["partial"] = True
+        stats["note"] = (
+            f"Собрано **{len(items)}** из **{limit}** — лимит времени. "
+            "Отдан частичный JSON."
+        )
+    return {"items": items, "stats": stats}
