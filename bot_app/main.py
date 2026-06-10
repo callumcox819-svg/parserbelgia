@@ -11,6 +11,7 @@ from bot_app.app_config import ADMIN_IDS, SETTINGS
 from bot_app.handlers import setup_routers
 from bot_app.handlers.start import setup_bot_commands
 from bot_app.middlewares import AccessMiddleware
+from bot_app.services.startup_notify import notify_bot_restarted
 from bot_app.storage import init_db
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -40,6 +41,7 @@ async def main() -> None:
 
     await setup_bot_commands(bot)
     logger.info("Bot started. Admins: %s", ADMIN_IDS)
+    await notify_bot_restarted(bot)
     await dp.start_polling(bot)
 
 

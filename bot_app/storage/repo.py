@@ -44,6 +44,15 @@ async def user_has_access(user_id: int) -> bool:
     return bool(row and row[0])
 
 
+async def get_user_ids_with_access() -> list[int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id FROM users WHERE has_access = 1 ORDER BY user_id"
+        ) as cur:
+            rows = await cur.fetchall()
+    return [int(row[0]) for row in rows]
+
+
 async def set_access(user_id: int, granted: bool) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(

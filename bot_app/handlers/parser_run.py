@@ -175,11 +175,16 @@ async def _deliver_parse_result(
 
     try:
         extra = _build_extra(platform, stats, count, limit)
-        title = "✅ Готово"
         if stats.get("timed_out"):
-            title = "⏱ Частично (таймаут)"
+            title = "⏱ Частично (лимит времени)"
+        elif stats.get("partial"):
+            title = "⚠️ Частично"
+        elif count < limit:
+            title = "✅ Готово (не полный лимит)"
+        else:
+            title = "✅ Готово"
         await status.edit_text(
-            f"{title} ({plat_label}): **{count}** объявлений (лимит {limit}).{extra}",
+            f"{title} ({plat_label}): **{count}** из **{limit}**.{extra}",
             parse_mode="Markdown",
         )
         await callback.message.answer_document(
@@ -258,7 +263,8 @@ async def run_parser(callback: CallbackQuery) -> None:
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"
     await status.edit_text(
-        f"⏳ Парсинг {plat_label}… ({start_hint}, лимит {limit}, до {timeout_min} мин)"
+        f"⏳ Парсинг {plat_label}… ({start_hint}, лимит {limit}, до {timeout_min} мин)\n"
+        f"Если за {timeout_min} мин не наберёт **{limit}** — отдам **сколько найдёт**."
         f"{seen_warn}",
         parse_mode="Markdown",
     )
