@@ -77,6 +77,7 @@ async def _run_2dehands(
     skip_auction_listings: bool = False,
     skip_vehicle_categories: bool = False,
     on_progress: ProgressFn = None,
+    parse_count: int = 0,
 ) -> dict[str, Any]:
     if skip_vehicle_categories:
         keys = [k for k in keys if k not in VEHICLE_CATEGORY_KEYS]
@@ -100,6 +101,7 @@ async def _run_2dehands(
             skip_seller_ids=set(skip_sellers),
             skip_auction_listings=skip_auction_listings,
             on_progress=on_progress,
+            parse_count=parse_count,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc):
@@ -153,6 +155,7 @@ async def run_user_parse(
     proxies = resolve_user_proxies(settings)
     remember_sellers = bool(settings.get("filter_remember_sellers", True))
     limit = int(settings["json_limit"])
+    parse_count = int(settings.get("parse_count") or 0)
     seen_in_db = 0
     skip_sellers: set[int] = set()
     if remember_sellers:
@@ -180,6 +183,7 @@ async def run_user_parse(
             skip_auction_listings=bool(settings.get("filter_skip_bids", True)),
             skip_vehicle_categories=bool(settings.get("filter_skip_vehicles", True)),
             on_progress=on_progress,
+            parse_count=parse_count,
         )
 
     stats = result.setdefault("stats", {})
