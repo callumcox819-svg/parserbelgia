@@ -157,8 +157,11 @@ async def run_parser(callback: CallbackQuery) -> None:
             if skipped:
                 extra += f"\n🚫 Пропущено аукционов (Bieden): **{skipped}**"
             if stats.get("partial"):
-                note = stats.get("note") or "Частичный результат (403 / лимит страниц)."
+                note = stats.get("note") or "Частичный результат."
                 extra += f"\n\n⚠️ {note}"
+            sellers_skip = int(stats.get("skipped_sellers") or 0)
+            if sellers_skip and count < limit:
+                extra += f"\n👤 Пропущено (продавец уже был): **{sellers_skip}** — сброс в Фильтры."
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)
             proxies_n = int(stats.get("proxies") or 0)

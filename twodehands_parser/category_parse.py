@@ -29,18 +29,6 @@ def _request_delay_sec() -> float:
         return 0.8
 
 
-def _max_offset(limit: int, *, skip_auctions: bool) -> int:
-    """Глубина пагинации. С фильтром Bieden нужно листать в разы больше."""
-    raw = os.environ.get("TWODEHANDS_MAX_OFFSET")
-    if raw:
-        try:
-            return max(PAGE_SIZE, int(raw))
-        except ValueError:
-            pass
-    multiplier = 60 if skip_auctions else 20
-    return min(max(limit * multiplier, 4000), 25000)
-
-
 async def _throttle() -> None:
     delay = _request_delay_sec()
     if delay > 0:
@@ -133,7 +121,7 @@ async def parse_l1_categories(
     pages_fetched = 0
     listings_scanned = 0
     partial_reason: str | None = None
-    max_offset = _max_offset(limit, skip_auctions=skip_auction_listings)
+    had_403 = False
 
     async def _report() -> None:
         if not on_progress:
@@ -149,12 +137,11 @@ async def parse_l1_categories(
         )
 
     logger.info(
-        "2dehands parse start cats=%s limit=%s proxies=%s seen=%s max_offset=%s",
+        "2dehands parse start cats=%s limit=%s proxies=%s seen=%s",
         len(category_ids),
         limit,
         len(proxy_list),
         len(skip),
-        max_offset,
     )
     pool = _ProxySessions(proxy_list)
     try:
@@ -172,16 +159,6 @@ async def parse_l1_categories(
             offset = 0
 
             while len(items) < limit:
-                if offset >= max_offset:
-                    logger.info(
-                        "2dehands cat=%s offset=%s >= max %s, stop pagination",
-                        cat_id,
-                        offset,
-                        max_offset,
-                    )
-                    partial_reason = "max_depth"
-                    break
-
                 page_limit = min(limit - len(items), PAGE_SIZE)
                 await _throttle()
                 api_url = api_url_from_params(
@@ -196,15 +173,16 @@ async def parse_l1_categories(
                 try:
                     data = await pool.fetch(api_url)
                 except RuntimeError as exc:
-                    if items:
-                        logger.warning(
-                            "2dehands 403 at offset=%s, return %s partial items",
-                            offset,
-                            len(items),
-                        )
-                        partial_reason = "403"
-                        break
-                    raise
+                    if "403" not in str(exc):
+                        raise
+                    had_403 = True
+                    logger.warning(
+                        "2dehands 403 cat=%s offset=%s items=%s, next category",
+                        cat_id,
+                        offset,
+                        len(items),
+                    )
+                    break
 
                 listings = data.get("listings") or []
                 pages_fetched += 1
@@ -245,7 +223,7 @@ async def parse_l1_categories(
                     if len(items) >= limit:
                         break
 
-                if len(items) >= limit or partial_reason:
+                if len(items) >= limit:
                     break
 
                 total = int(data.get("totalResultCount") or 0)
@@ -253,30 +231,29 @@ async def parse_l1_categories(
                 if offset >= total:
                     break
 
-            if partial_reason:
+            if len(items) >= limit:
                 break
     finally:
         await pool.close()
+
+    if had_403 and len(items) < limit:
+        partial_reason = "403"
 
     stats: dict[str, Any] = {
         "skipped_auctions": skipped_auctions,
         "skipped_sellers": skipped_sellers,
         "pages_fetched": pages_fetched,
         "listings_scanned": listings_scanned,
-        "max_offset": max_offset,
     }
-    if partial_reason:
+    if partial_reason == "403" and items:
         stats["partial"] = True
-        stats["partial_reason"] = partial_reason
-        if partial_reason == "403":
-            stats["note"] = (
-                "CloudFront **403** — прокси или IP заблокирован на глубине. "
-                "Для 2dehands часто стабильнее **без прокси** (Настройки → Прокси → `off`). "
-                "Или другой BE-прокси / снизьте лимит."
-            )
-        else:
-            stats["note"] = (
-                f"Достигнута глубина **{max_offset}** листингов (лимит {limit} не набран). "
-                "Много **Bieden** в выдаче — отключите фильтр или сбросьте память продавцов."
-            )
+        stats["partial_reason"] = "403"
+        stats["note"] = (
+            f"CloudFront **403** на глубине (собрано **{len(items)}** из {limit}). "
+            "Для 2dehands: **Прокси → `off`**, или сбросьте память продавцов в Фильтры."
+        )
+    elif len(items) < limit and not items:
+        stats["note"] = (
+            "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."
+        )
     return {"items": items, "stats": stats}
