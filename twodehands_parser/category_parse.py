@@ -157,8 +157,10 @@ async def parse_l1_categories(
                 "attributesByKey[]": ["Language:all-languages"],
             }
             offset = 0
+            stale_pages = 0
 
             while len(items) < limit:
+                items_before_page = len(items)
                 page_limit = min(limit - len(items), PAGE_SIZE)
                 await _throttle()
                 api_url = api_url_from_params(
@@ -226,6 +228,19 @@ async def parse_l1_categories(
                 if len(items) >= limit:
                     break
 
+                if len(items) == items_before_page:
+                    stale_pages += 1
+                else:
+                    stale_pages = 0
+                if stale_pages >= 5:
+                    logger.info(
+                        "2dehands cat=%s no new items for %s pages at offset=%s, next category",
+                        cat_id,
+                        stale_pages,
+                        offset,
+                    )
+                    break
+
                 total = int(data.get("totalResultCount") or 0)
                 offset += page_limit
                 if offset >= total:
@@ -245,12 +260,21 @@ async def parse_l1_categories(
         "pages_fetched": pages_fetched,
         "listings_scanned": listings_scanned,
     }
+    if len(items) < limit and items:
+        stats["shortfall"] = True
     if partial_reason == "403" and items:
         stats["partial"] = True
         stats["partial_reason"] = "403"
         stats["note"] = (
-            f"CloudFront **403** на глубине (собрано **{len(items)}** из {limit}). "
-            "Для 2dehands: **Прокси → `off`**, или сбросьте память продавцов в Фильтры."
+            f"Собрано **{len(items)}** из **{limit}**. CloudFront **403** — "
+            "**Прокси → off** (для 2dehands), сбросьте память продавцов или "
+            "выключите «Не повторять продавцов» в Фильтры."
+        )
+    elif len(items) < limit and skipped_sellers > limit and items:
+        stats["note"] = (
+            f"Собрано **{len(items)}** из **{limit}**. "
+            f"Пропущено **{skipped_sellers}** старых продавцов — "
+            "**Фильтры → Сбросить память** или выкл. «Не повторять продавцов»."
         )
     elif len(items) < limit and not items:
         stats["note"] = (

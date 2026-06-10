@@ -151,7 +151,12 @@ async def run_user_parse(
         raise ValueError("Включите хотя бы одну категорию в настройках.")
 
     proxies = resolve_user_proxies(settings)
-    skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
+    remember_sellers = bool(settings.get("filter_remember_sellers", True))
+    skip_sellers = (
+        await repo.get_seen_seller_ids(user_id, platform)
+        if remember_sellers
+        else set()
+    )
     limit = int(settings["json_limit"])
 
     logger.info(
@@ -179,9 +184,15 @@ async def run_user_parse(
 
     stats = result.setdefault("stats", {})
     stats["proxies_used"] = len(proxies)
-    stats["seen_sellers_before"] = len(skip_sellers)
+    stats["seen_sellers_before"] = (
+        len(await repo.get_seen_seller_ids(user_id, platform))
+        if remember_sellers
+        else 0
+    )
+    stats["remember_sellers"] = remember_sellers
 
-    new_sellers = _seller_ids_from_items(result.get("items", []))
-    await repo.add_seen_sellers(user_id, platform, new_sellers)
+    if remember_sellers:
+        new_sellers = _seller_ids_from_items(result.get("items", []))
+        await repo.add_seen_sellers(user_id, platform, new_sellers)
     await repo.increment_parse_count(user_id)
     return result

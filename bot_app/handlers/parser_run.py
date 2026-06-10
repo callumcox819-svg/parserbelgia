@@ -105,16 +105,30 @@ async def run_parser(callback: CallbackQuery) -> None:
         except Exception:
             logger.debug("progress edit skipped", exc_info=True)
 
-    await status.edit_text(f"⏳ Парсинг {plat_label}… (старт)")
+    limit = int(settings["json_limit"])
+    remember = bool(settings.get("filter_remember_sellers", True))
+    seen_warn = ""
+    if remember:
+        seen_n = len(await repo.get_seen_seller_ids(uid, platform))
+        if seen_n > limit:
+            seen_warn = (
+                f"\n⚠️ В памяти **{seen_n}** продавцов — часть листингов будет пропущена. "
+                "Фильтры → сброс или выкл. «Не повторять продавцов»."
+            )
+    start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"
+    await status.edit_text(
+        f"⏳ Парсинг {plat_label}… ({start_hint}, лимит {limit}){seen_warn}",
+        parse_mode="Markdown",
+    )
 
     try:
         result = await asyncio.wait_for(
             run_user_parse(uid, on_progress=on_progress),
-            timeout=600.0,
+            timeout=900.0,
         )
     except asyncio.TimeoutError:
         await status.edit_text(
-            "❌ Таймаут 10 мин. Снизьте лимит JSON или смените прокси."
+            "❌ Таймаут 15 мин. Снизьте лимит JSON, выключите память продавцов или прокси → off."
         )
         return
     except ValueError as exc:
@@ -156,12 +170,14 @@ async def run_parser(callback: CallbackQuery) -> None:
             skipped = int(stats.get("skipped_auctions") or 0)
             if skipped:
                 extra += f"\n🚫 Пропущено аукционов (Bieden): **{skipped}**"
-            if stats.get("partial"):
-                note = stats.get("note") or "Частичный результат."
+            note = stats.get("note")
+            if note and count < limit:
                 extra += f"\n\n⚠️ {note}"
             sellers_skip = int(stats.get("skipped_sellers") or 0)
-            if sellers_skip and count < limit:
-                extra += f"\n👤 Пропущено (продавец уже был): **{sellers_skip}** — сброс в Фильтры."
+            if sellers_skip and count < limit and not note:
+                extra += (
+                    f"\n👤 Пропущено (продавец уже был): **{sellers_skip}** — сброс в Фильтры."
+                )
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)
             proxies_n = int(stats.get("proxies") or 0)

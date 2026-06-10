@@ -15,6 +15,7 @@ def filters_keyboard(
     *,
     skip_bids: bool,
     skip_vehicles: bool,
+    remember_sellers: bool = True,
     platform: str,
 ) -> InlineKeyboardMarkup:
     if platform != PLATFORM_2DEHANDS:
@@ -31,6 +32,7 @@ def filters_keyboard(
         )
     bid_mark = "✅" if skip_bids else "⬜"
     veh_mark = "✅" if skip_vehicles else "⬜"
+    mem_mark = "✅" if remember_sellers else "⬜"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -43,6 +45,12 @@ def filters_keyboard(
                 InlineKeyboardButton(
                     text=f"{veh_mark} Без авто / броммеров",
                     callback_data=CB_FILTER_SKIP_VEHICLES,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{mem_mark} Не повторять продавцов",
+                    callback_data=CB_FILTER_REMEMBER_SELLERS,
                 )
             ],
             [
@@ -67,6 +75,7 @@ CB_SET_FILTERS = "set:filters"
 CB_FILTER_SKIP_BIDS = "filt:bids"
 CB_FILTER_SKIP_VEHICLES = "filt:veh"
 CB_FILTER_CLEAR_SELLERS = "filt:clear_sellers"
+CB_FILTER_REMEMBER_SELLERS = "filt:remember"
 CB_SET_BACK = "set:back"
 CB_SET_MENU = "set:menu"
 

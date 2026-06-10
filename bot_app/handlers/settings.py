@@ -18,6 +18,7 @@ from bot_app.keyboards import (
     CB_FILTER_SKIP_BIDS,
     CB_FILTER_SKIP_VEHICLES,
     CB_FILTER_CLEAR_SELLERS,
+    CB_FILTER_REMEMBER_SELLERS,
     cancel_keyboard,
     filters_keyboard,
     categories_keyboard,
@@ -198,8 +199,9 @@ async def open_filters(callback: CallbackQuery) -> None:
         "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
         "**Без авто / броммеров** — не парсить категории:\n"
         "🚗 Авто, 🔧 Автозапчасти, 🚲 Вело и мопеды.\n\n"
-        "**Память продавцов** — бот не отдаёт одного продавца дважды. "
-        "Если «ничего не найдено» — нажмите «Сбросить память».\n\n"
+        "**Не повторять продавцов** — бот не отдаёт одного продавца дважды "
+        "(между запусками). Если мало объявлений — выключите или "
+        "«Сбросить память».\n\n"
         "Вкл/выкл кнопками ниже."
     )
     if platform != "2dehands":
@@ -213,6 +215,7 @@ async def open_filters(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
         parse_mode="Markdown",
@@ -230,6 +233,7 @@ async def toggle_skip_bids(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
     )
@@ -255,11 +259,30 @@ async def toggle_skip_vehicles(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
             platform=platform,
         ),
     )
     state = "включён" if s.get("filter_skip_vehicles", True) else "выключен"
     await callback.answer(f"Без авто/броммеров: {state}")
+
+
+@router.callback_query(F.data == CB_FILTER_REMEMBER_SELLERS)
+async def toggle_remember_sellers(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    await repo.toggle_filter_remember_sellers(uid)
+    s = await repo.get_user_settings(uid)
+    platform = normalize_platform(s.get("platform"))
+    await callback.message.edit_reply_markup(
+        reply_markup=filters_keyboard(
+            skip_bids=bool(s.get("filter_skip_bids", True)),
+            skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", True)),
+            platform=platform,
+        ),
+    )
+    state = "включено" if s.get("filter_remember_sellers", True) else "выключено"
+    await callback.answer(f"Не повторять продавцов: {state}")
 
 
 @router.callback_query(F.data == CB_SET_LIMIT)
