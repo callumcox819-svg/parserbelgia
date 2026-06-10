@@ -51,21 +51,10 @@ def _http_error(status: int, raw: str, proxy: str | None) -> RuntimeError:
 
 
 def _sort_for_run(parse_count: int, cat_index: int) -> tuple[str, str]:
-    variants = [
-        ("SORT_INDEX", "DECREASING"),
-        ("SORT_INDEX", "INCREASING"),
-    ]
-    return variants[(parse_count + cat_index) % len(variants)]
-
-
-def _start_offset(parse_count: int, cat_index: int, skip_count: int) -> int:
-    """С большой памятью объявлений не начинаем с offset=0 — там только «старые»."""
-    if skip_count < 500:
-        return 0
-    depth = min(skip_count // 20, 4000)
-    rot = (parse_count * 200 + cat_index * 350) % 2500
-    off = depth + rot
-    return (off // 30) * 30
+    """Новые лоты и продавцы — в начале ленты по дате (DATE ↓)."""
+    if (parse_count + cat_index) % 4 == 3:
+        return ("SORT_INDEX", "DECREASING")
+    return ("DATE", "DECREASING")
 
 
 class _ProxySessions:
@@ -123,7 +112,7 @@ async def parse_l1_categories(
     limit: int,
     proxy: str | None = None,
     proxies: list[str | None] | None = None,
-    skip_item_ids: set[str] | None = None,
+    skip_seller_ids: set[int] | None = None,
     skip_auction_listings: bool = False,
     on_progress: ProgressFn = None,
     parse_count: int = 0,
@@ -138,11 +127,11 @@ async def parse_l1_categories(
     if not proxy_list:
         proxy_list = [None]
 
-    skip = set(skip_item_ids) if skip_item_ids else set()
+    skip = set(skip_seller_ids) if skip_seller_ids else set()
     items: list[dict[str, Any]] = []
     seen_items: set[str] = set()
     skipped_auctions = 0
-    skipped_items = 0
+    skipped_sellers = 0
     pages_fetched = 0
     listings_scanned = 0
     partial_reason: str | None = None
@@ -162,7 +151,7 @@ async def parse_l1_categories(
                 "pages_fetched": pages_fetched,
                 "listings_scanned": listings_scanned,
                 "skipped_auctions": skipped_auctions,
-                "skipped_items": skipped_items,
+                "skipped_sellers": skipped_sellers,
             }
         )
 
@@ -196,19 +185,16 @@ async def parse_l1_categories(
                 "sortOrder": sort_order,
                 "attributesByKey[]": ["Language:all-languages"],
             }
-            offset = _start_offset(parse_count, cat_index, skip_at_start)
+            offset = 0
             stale_pages = 0
-            retried_from_zero = offset == 0
             retried_after_403 = False
-            if offset > 0:
-                logger.info(
-                    "2dehands cat=%s start offset=%s sort=%s/%s seen=%s",
-                    cat_id,
-                    offset,
-                    sort_by,
-                    sort_order,
-                    skip_at_start,
-                )
+            logger.info(
+                "2dehands cat=%s sort=%s/%s seen_sellers=%s",
+                cat_id,
+                sort_by,
+                sort_order,
+                skip_at_start,
+            )
 
             while len(items) < limit:
                 if _past_deadline():
@@ -245,7 +231,6 @@ async def parse_l1_categories(
                             )
                             offset = 0
                             retried_after_403 = True
-                            retried_from_zero = True
                             stale_pages = 0
                             await asyncio.sleep(2.0)
                             continue
@@ -272,47 +257,41 @@ async def parse_l1_categories(
                 pages_fetched += 1
                 await _report()
                 if not listings:
-                    if offset > 0 and not retried_from_zero:
-                        logger.info(
-                            "2dehands cat=%s offset=%s empty, retry from 0",
-                            cat_id,
-                            offset,
-                        )
-                        offset = 0
-                        retried_from_zero = True
-                        stale_pages = 0
-                        continue
                     break
 
                 listings_scanned += len(listings)
                 page_non_auction = 0
-                page_item_skips = 0
+                page_seller_skips = 0
                 for listing in listings:
                     if skip_auction_listings and listing_is_auction(listing):
                         skipped_auctions += 1
                         continue
 
                     page_non_auction += 1
-                    item_id = str(listing.get("itemId") or "")
-                    if not item_id:
-                        continue
-                    if item_id in seen_items:
-                        continue
-                    if item_id in skip:
-                        skipped_items += 1
-                        page_item_skips += 1
+                    item_id = listing.get("itemId")
+                    if item_id and item_id in seen_items:
                         continue
 
-                    seen_items.add(item_id)
+                    seller = listing.get("sellerInformation") or {}
+                    seller_id = seller.get("sellerId")
+                    if seller_id and int(seller_id) in skip:
+                        skipped_sellers += 1
+                        page_seller_skips += 1
+                        continue
+
+                    if item_id:
+                        seen_items.add(item_id)
                     void_item = listing_to_void_item(listing)
                     if skip_auction_listings and void_item_is_auction_price(
                         str(void_item.get("item_price") or "")
                     ):
                         skipped_auctions += 1
-                        seen_items.discard(item_id)
+                        if item_id:
+                            seen_items.discard(item_id)
                         continue
                     items.append(void_item)
-                    skip.add(item_id)
+                    if seller_id:
+                        skip.add(int(seller_id))
 
                     if len(items) >= limit:
                         break
@@ -326,12 +305,12 @@ async def parse_l1_categories(
                 elif page_non_auction == 0:
                     # Страница только Bieden — листаем дальше.
                     pass
-                elif page_item_skips > 0:
-                    # Память объявлений — листаем глубже, не уходим из категории.
+                elif page_seller_skips > 0:
+                    # Старые продавцы на странице — листаем дальше (ищем новых).
                     pass
                 else:
                     stale_pages += 1
-                stale_limit = 40 if skip_at_start > limit * 5 else 12
+                stale_limit = 60 if skip_at_start > limit * 3 else 20
                 if stale_pages >= stale_limit:
                     logger.info(
                         "2dehands cat=%s no new items for %s pages at offset=%s, next category",
@@ -360,8 +339,7 @@ async def parse_l1_categories(
 
     stats: dict[str, Any] = {
         "skipped_auctions": skipped_auctions,
-        "skipped_items": skipped_items,
-        "skipped_sellers": skipped_items,
+        "skipped_sellers": skipped_sellers,
         "pages_fetched": pages_fetched,
         "listings_scanned": listings_scanned,
     }
@@ -389,15 +367,15 @@ async def parse_l1_categories(
     elif len(items) < limit and skip_at_start > limit * 5 and items:
         stats["note"] = (
             f"Собрано **{len(items)}** из **{limit}**. "
-            f"Память **{skip_at_start}** объявлений — бот листал глубже, но новых мало. "
+            f"Память **{skip_at_start}** продавцов — листали с начала (DATE), новых мало. "
             "**Фильтры → Сбросить память** если нужен полный лимит снова."
         )
     elif len(items) < limit and not items:
         stats["note"] = (
-            "Пусто — сбросьте память объявлений (Фильтры) или отключите фильтр Bieden."
+            "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."
         )
     if not items and listings_scanned > 0:
-        filtered = skipped_auctions + skipped_items
+        filtered = skipped_auctions + skipped_sellers
         if filtered >= int(listings_scanned * 0.85):
             stats["all_filtered"] = True
     if not items and had_403 and pages_fetched < 5:

@@ -199,15 +199,15 @@ async def open_filters(callback: CallbackQuery) -> None:
         "(FAST_BID / MIN_BID), только фикс. цена €.\n\n"
         "**Без авто / броммеров** — не парсить категории:\n"
         "🚗 Авто, 🔧 Автозапчасти, 🚲 Вело и мопеды.\n\n"
-        "**Не повторять объявления** — в JSON не попадёт то же объявление "
-        "дважды, но **новые лоты** от тех же продавцов — да. "
-        "«Сбросить память» — с нуля.\n\n"
+        "**Не повторять продавцов** — в JSON только **новые люди** "
+        "(с прошлых запусков не повторяются). Поиск с **начала ленты**, "
+        "сортировка по **дате**. «Сбросить память» — с нуля.\n\n"
         "Вкл/выкл кнопками ниже."
     )
     if platform != "2dehands":
         text = (
             "Фильтры категорий — только для **2dehands**.\n\n"
-            "**Память объявлений** общая: если Ricardo «ничего не нашёл», "
+            "**Память продавцов** общая: если Ricardo «ничего не нашёл», "
             "сбросьте память кнопкой ниже."
         )
     await callback.message.edit_text(
@@ -246,7 +246,7 @@ async def clear_sellers_memory(callback: CallbackQuery) -> None:
     uid = callback.from_user.id
     platform = normalize_platform((await repo.get_user_settings(uid)).get("platform"))
     removed = await repo.clear_seen_sellers(uid, platform)
-    await callback.answer(f"Сброшено объявлений в памяти: {removed}")
+    await callback.answer(f"Сброшено в памяти: {removed}")
 
 
 @router.callback_query(F.data == CB_FILTER_SKIP_VEHICLES)
@@ -282,7 +282,7 @@ async def toggle_remember_sellers(callback: CallbackQuery) -> None:
         ),
     )
     state = "включено" if s.get("filter_remember_sellers", True) else "выключено"
-    await callback.answer(f"Не повторять объявления: {state}")
+    await callback.answer(f"Не повторять продавцов: {state}")
 
 
 @router.callback_query(F.data == CB_SET_LIMIT)
