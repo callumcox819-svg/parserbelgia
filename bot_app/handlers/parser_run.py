@@ -106,11 +106,16 @@ async def run_parser(callback: CallbackQuery) -> None:
             logger.debug("progress edit skipped", exc_info=True)
 
     limit = int(settings["json_limit"])
-    remember = bool(settings.get("filter_remember_sellers", True))
+    remember = bool(settings.get("filter_remember_sellers", False))
     seen_warn = ""
     if remember:
         seen_n = len(await repo.get_seen_seller_ids(uid, platform))
-        if seen_n > limit:
+        if seen_n > limit * 3:
+            seen_warn = (
+                f"\n💡 В памяти **{seen_n}** продавцов — для этого запуска память "
+                "будет **отключена**, чтобы набрать лимит."
+            )
+        elif seen_n > limit:
             seen_warn = (
                 f"\n⚠️ В памяти **{seen_n}** продавцов — часть листингов будет пропущена. "
                 "Фильтры → сброс или выкл. «Не повторять продавцов»."
@@ -173,10 +178,17 @@ async def run_parser(callback: CallbackQuery) -> None:
             note = stats.get("note")
             if note and count < limit:
                 extra += f"\n\n⚠️ {note}"
-            sellers_skip = int(stats.get("skipped_sellers") or 0)
-            if sellers_skip and count < limit and not note:
+            seen_db = int(stats.get("seen_sellers_before") or 0)
+            if stats.get("seller_memory_bypassed") and seen_db:
                 extra += (
-                    f"\n👤 Пропущено (продавец уже был): **{sellers_skip}** — сброс в Фильтры."
+                    f"\n💡 Память продавцов отключена на этот запуск "
+                    f"(в БД было **{seen_db}** — мешало набору лимита)."
+                )
+            sellers_skip = int(stats.get("skipped_sellers") or 0)
+            if sellers_skip:
+                extra += (
+                    f"\n👤 Пропущено из **памяти бота**: **{sellers_skip}** "
+                    "(это не «повторы на сайте», а продавцы с прошлых запусков)."
                 )
         if platform == "ricardo" and stats:
             enriched = int(stats.get("enriched") or 0)

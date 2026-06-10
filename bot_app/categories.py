@@ -23,7 +23,7 @@ L1_CATEGORIES: list[Category] = [
     Category("computers-en-software", "💻 Компьютеры", 322),
     Category("telecommunicatie", "📱 Телефоны", 820),
     Category("speelgoed-en-spellen", "🎮 Игрушки", 356),
-    Category("sport-en-fitness", "⚽ Спорт", 376),
+    Category("sport-en-fitness", "⚽ Спорт", 378),
     Category("tuin-en-terras", "🌿 Сад", 1841),
     Category("dieren-en-toebehoren", "🐾 Животные", 395),
     Category("diensten-en-vakmensen", "🛠 Услуги", 1099),

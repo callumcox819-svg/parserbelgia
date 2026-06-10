@@ -78,7 +78,7 @@ async def get_user_settings(user_id: int) -> dict[str, Any]:
             "parse_count": 0,
             "filter_skip_bids": True,
             "filter_skip_vehicles": True,
-            "filter_remember_sellers": True,
+            "filter_remember_sellers": False,
         }
     return {
         "platform": normalize_platform(row[0]),
@@ -87,7 +87,7 @@ async def get_user_settings(user_id: int) -> dict[str, Any]:
         "parse_count": row[3],
         "filter_skip_bids": bool(row[4]) if len(row) > 4 else True,
         "filter_skip_vehicles": bool(row[5]) if len(row) > 5 else True,
-        "filter_remember_sellers": bool(row[6]) if len(row) > 6 else True,
+        "filter_remember_sellers": bool(row[6]) if len(row) > 6 else False,
     }
 
 
@@ -108,7 +108,7 @@ async def toggle_filter_skip_bids(user_id: int) -> bool:
 
 async def toggle_filter_remember_sellers(user_id: int) -> bool:
     s = await get_user_settings(user_id)
-    new_val = not s.get("filter_remember_sellers", True)
+    new_val = not s.get("filter_remember_sellers", False)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """

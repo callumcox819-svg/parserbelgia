@@ -127,7 +127,7 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         )
     if user_cols and "filter_remember_sellers" not in user_cols:
         await db.execute(
-            "ALTER TABLE users ADD COLUMN filter_remember_sellers INTEGER NOT NULL DEFAULT 1"
+            "ALTER TABLE users ADD COLUMN filter_remember_sellers INTEGER NOT NULL DEFAULT 0"
         )
 
     if cache_cols and "platform" not in cache_cols:

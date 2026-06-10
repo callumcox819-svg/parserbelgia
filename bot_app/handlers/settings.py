@@ -215,7 +215,7 @@ async def open_filters(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", False)),
             platform=platform,
         ),
         parse_mode="Markdown",
@@ -233,7 +233,7 @@ async def toggle_skip_bids(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", False)),
             platform=platform,
         ),
     )
@@ -259,7 +259,7 @@ async def toggle_skip_vehicles(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", False)),
             platform=platform,
         ),
     )
@@ -277,11 +277,11 @@ async def toggle_remember_sellers(callback: CallbackQuery) -> None:
         reply_markup=filters_keyboard(
             skip_bids=bool(s.get("filter_skip_bids", True)),
             skip_vehicles=bool(s.get("filter_skip_vehicles", True)),
-            remember_sellers=bool(s.get("filter_remember_sellers", True)),
+            remember_sellers=bool(s.get("filter_remember_sellers", False)),
             platform=platform,
         ),
     )
-    state = "включено" if s.get("filter_remember_sellers", True) else "выключено"
+    state = "включено" if s.get("filter_remember_sellers", False) else "выключено"
     await callback.answer(f"Не повторять продавцов: {state}")
 
 

@@ -206,11 +206,13 @@ async def parse_l1_categories(
                     break
 
                 listings_scanned += len(listings)
+                page_non_auction = 0
                 for listing in listings:
                     if skip_auction_listings and listing_is_auction(listing):
                         skipped_auctions += 1
                         continue
 
+                    page_non_auction += 1
                     item_id = listing.get("itemId")
                     if item_id and item_id in seen_items:
                         continue
@@ -241,11 +243,16 @@ async def parse_l1_categories(
                 if len(items) >= limit:
                     break
 
-                if len(items) == items_before_page:
-                    stale_pages += 1
-                else:
+                added = len(items) - items_before_page
+                if added > 0:
                     stale_pages = 0
-                if stale_pages >= 5:
+                elif page_non_auction == 0:
+                    # Страница только Bieden — листаем дальше, не считаем «пустой».
+                    pass
+                else:
+                    stale_pages += 1
+                stale_limit = 15 if len(skip) < limit else 5
+                if stale_pages >= stale_limit:
                     logger.info(
                         "2dehands cat=%s no new items for %s pages at offset=%s, next category",
                         cat_id,
@@ -289,7 +296,7 @@ async def parse_l1_categories(
         else:
             stats["note"] = (
                 f"Собрано **{len(items)}** из **{limit}**. API **400** на части "
-                "категорий (лимит/offset) — попробуйте снова или снизьте лимит."
+                "категорий — попробуйте снова; если повторяется, отключите категорию в настройках."
             )
     elif len(items) < limit and skipped_sellers > limit and items:
         stats["note"] = (
