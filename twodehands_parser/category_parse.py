@@ -88,10 +88,10 @@ def _max_offset_per_cat(seen: int, limit: int) -> int:
     if seen <= limit * 5:
         return 100_000
     if seen <= limit * 20:
-        return 3000
+        return 1200
     if seen <= limit * 50:
-        return 1500
-    return 900
+        return 600
+    return 450
 
 
 class _ProxySessions:
@@ -122,22 +122,29 @@ class _ProxySessions:
     async def fetch(self, api_url: str) -> dict[str, Any]:
         last_exc: RuntimeError | None = None
         n = len(self.proxies)
-        for i in range(n):
-            proxy_idx = (self._index + i) % n
-            proxy = self.proxies[proxy_idx]
-            try:
-                if self._session is None:
-                    await self._open(proxy)
-                return await _fetch_search_page(
-                    self._session, api_url, request_kwargs=self._request_kwargs
-                )
-            except RuntimeError as exc:
-                if "403" not in str(exc):
-                    raise
-                last_exc = exc
-                logger.warning("2dehands page 403 proxy=%s, try next", proxy)
-                await self.close()
-                self._index = (proxy_idx + 1) % n
+        for pass_i in range(2):
+            for i in range(n):
+                proxy_idx = (self._index + i) % n
+                proxy = self.proxies[proxy_idx]
+                try:
+                    if self._session is None:
+                        await self._open(proxy)
+                    return await _fetch_search_page(
+                        self._session, api_url, request_kwargs=self._request_kwargs
+                    )
+                except RuntimeError as exc:
+                    if "403" not in str(exc):
+                        raise
+                    last_exc = exc
+                    logger.warning(
+                        "2dehands page 403 proxy=%s pass=%s, try next",
+                        proxy,
+                        pass_i + 1,
+                    )
+                    await self.close()
+                    self._index = (proxy_idx + 1) % n
+            if pass_i == 0:
+                await asyncio.sleep(4.0 + random.uniform(0, 2.0))
         if last_exc:
             raise _http_error(403, str(last_exc), self.proxies[0])
         raise RuntimeError("Нет прокси для запроса 2dehands.")
@@ -429,10 +436,10 @@ async def parse_l1_categories(
 
     if timed_out and len(items) < limit:
         partial_reason = "timeout"
-    elif had_403 and len(items) < limit:
-        partial_reason = "403"
     elif had_400 and len(items) < limit:
         partial_reason = "400"
+    elif had_403 and len(items) < limit and (not items or pages_fetched < 12):
+        partial_reason = "403"
 
     stats: dict[str, Any] = {
         "skipped_auctions": skipped_auctions,
@@ -441,6 +448,8 @@ async def parse_l1_categories(
         "listings_scanned": listings_scanned,
         "fresh_rescans": fresh_rescans,
     }
+    if had_403:
+        stats["had_403"] = True
     if len(items) < limit and items:
         stats["shortfall"] = True
     if partial_reason in ("403", "400", "timeout") and items:
@@ -462,13 +471,22 @@ async def parse_l1_categories(
                 f"Собрано **{len(items)}** из **{limit}**. API **400** на части "
                 "категорий — попробуйте снова; если повторяется, отключите категорию в настройках."
             )
-    elif len(items) < limit and skip_at_start > limit * 5 and items:
-        stats["note"] = (
-            f"Собрано **{len(items)}** из **{limit}**. "
-            f"Память **{skip_at_start}** продавцов — почти все свежие уже были. "
-            "**Фильтры → Сбросить память** и **Прокси → off** (если 403)."
+    elif len(items) < limit and items:
+        mem_note = (
+            f"Собрано **{len(items)}** из **{limit}**."
         )
-        stats["memory_exhausted"] = skip_at_start > limit * 30
+        if skip_at_start > limit * 5:
+            mem_note += (
+                f" Память **{skip_at_start}** продавцов — новых мало."
+            )
+            stats["memory_exhausted"] = skip_at_start > limit * 30
+        if had_403:
+            mem_note += (
+                " Часть категорий оборвалась по **403** — не запускайте "
+                "два парсинга сразу, подождите 2–3 мин."
+            )
+        stats["note"] = mem_note
+        stats["partial"] = True
     elif len(items) < limit and not items:
         stats["note"] = (
             "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."

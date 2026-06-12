@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 from bot_app.category_registry import categories_for_platform, category_by_key
 from bot_app.platforms import DEFAULT_PLATFORM, normalize_platform
@@ -282,6 +286,53 @@ async def clear_seen_sellers(user_id: int, platform: str) -> int:
     return n
 
 
+def seller_memory_cap() -> int:
+    raw = os.environ.get("SELLER_MEMORY_CAP", "12000")
+    try:
+        return max(1000, int(raw))
+    except ValueError:
+        return 12000
+
+
+async def trim_seen_sellers(user_id: int, platform: str, cap: int | None = None) -> int:
+    """Оставить только последние cap продавцов (по rowid)."""
+    platform = normalize_platform(platform)
+    limit = cap if cap is not None else seller_memory_cap()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT COUNT(*) FROM user_seen_sellers
+            WHERE user_id = ? AND platform = ?
+            """,
+            (user_id, platform),
+        ) as cur:
+            total = int((await cur.fetchone())[0])
+        if total <= limit:
+            return 0
+        to_drop = total - limit
+        await db.execute(
+            """
+            DELETE FROM user_seen_sellers
+            WHERE user_id = ? AND platform = ? AND seller_id IN (
+                SELECT seller_id FROM user_seen_sellers
+                WHERE user_id = ? AND platform = ?
+                ORDER BY rowid ASC
+                LIMIT ?
+            )
+            """,
+            (user_id, platform, user_id, platform, to_drop),
+        )
+        await db.commit()
+    logger.info(
+        "trim seen sellers user=%s platform=%s %s -> %s",
+        user_id,
+        platform,
+        total,
+        limit,
+    )
+    return to_drop
+
+
 async def add_seen_sellers(
     user_id: int, platform: str, seller_ids: set[int]
 ) -> None:
@@ -297,6 +348,7 @@ async def add_seen_sellers(
             [(user_id, platform, sid) for sid in seller_ids],
         )
         await db.commit()
+    await trim_seen_sellers(user_id, platform)
 
 
 async def add_seen_items(

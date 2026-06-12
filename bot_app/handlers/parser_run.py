@@ -94,6 +94,9 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
         note = stats.get("note")
         if note and count < limit:
             extra += f"\n\n⚠️ {note}"
+        trimmed = int(stats.get("sellers_trimmed") or 0)
+        if trimmed:
+            extra += f"\n✂️ Обрезано старых продавцов: **{trimmed}**."
         sellers_skip = int(stats.get("skipped_sellers") or 0)
         seen_db = int(stats.get("seen_sellers_before") or 0)
         if stats.get("remember_sellers") and seen_db:
@@ -255,16 +258,15 @@ async def run_parser(callback: CallbackQuery) -> None:
     seen_warn = ""
     if remember:
         seen_n = len(await repo.get_seen_seller_ids(uid, platform))
-        if seen_n > 0:
+        cap = repo.seller_memory_cap()
+        if seen_n > cap:
             seen_warn = (
-                f"\n👤 Память: **{seen_n}** продавцов — свежие → все категории → "
-                "снова с начала."
+                f"\n✂️ Память **{seen_n}** → обрежу до **{cap}** перед поиском."
             )
-            if seen_n > limit * 30:
-                seen_warn += (
-                    f"\n⚠️ Память **{seen_n}** — слишком большая, новых мало. "
-                    "**Фильтры → Сбросить память**."
-                )
+        elif seen_n > 0:
+            seen_warn = (
+                f"\n👤 Память: **{seen_n}** продавцов (лимит **{cap}**)."
+            )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"
     await status.edit_text(

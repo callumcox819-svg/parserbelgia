@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,8 @@ from twodehands_parser.url_builder import BASE, extract_l1_category_id
 from ricardo_parser.category_parse import parse_ricardo_categories
 
 logger = logging.getLogger(__name__)
+
+_PARSE_LOCK = asyncio.Lock()
 
 
 def resolve_user_proxies(settings: dict[str, Any]) -> list[str | None]:
@@ -158,6 +161,25 @@ async def run_user_parse(
     on_progress: ProgressFn = None,
     deadline: float | None = None,
 ) -> dict[str, Any]:
+    if _PARSE_LOCK.locked():
+        raise ValueError(
+            "Сейчас уже идёт другой парсинг. Подождите 1–2 мин и нажмите снова — "
+            "одновременные запуски бьют IP и дают CloudFront 403."
+        )
+    async with _PARSE_LOCK:
+        return await _run_user_parse_locked(
+            user_id,
+            on_progress=on_progress,
+            deadline=deadline,
+        )
+
+
+async def _run_user_parse_locked(
+    user_id: int,
+    *,
+    on_progress: ProgressFn = None,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     settings = await repo.get_user_settings(user_id)
     platform = normalize_platform(settings.get("platform"))
     keys = await repo.get_enabled_category_keys(user_id, platform)
@@ -169,8 +191,17 @@ async def run_user_parse(
     limit = int(settings["json_limit"])
     parse_count = int(settings.get("parse_count") or 0)
     seen_in_db = 0
+    sellers_trimmed = 0
     skip_sellers: set[int] = set()
     if remember_sellers:
+        sellers_trimmed = await repo.trim_seen_sellers(user_id, platform)
+        if sellers_trimmed:
+            logger.info(
+                "parse user=%s trimmed %s old sellers (cap=%s)",
+                user_id,
+                sellers_trimmed,
+                repo.seller_memory_cap(),
+            )
         skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
         seen_in_db = len(skip_sellers)
 
@@ -205,6 +236,9 @@ async def run_user_parse(
     stats["proxies_used"] = len(proxies)
     stats["seen_sellers_before"] = seen_in_db if remember_sellers else 0
     stats["remember_sellers"] = remember_sellers
+    if remember_sellers:
+        stats["seller_memory_cap"] = repo.seller_memory_cap()
+        stats["sellers_trimmed"] = sellers_trimmed
 
     if remember_sellers:
         new_sellers = _seller_ids_from_items(result.get("items", []))
