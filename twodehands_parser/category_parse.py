@@ -72,6 +72,28 @@ def _category_rounds_max() -> int:
         return 2
 
 
+def _max_zero_add_pages(seen: int, limit: int) -> int:
+    """Подряд страниц без новых объявлений — затем следующая категория."""
+    if seen <= limit * 3:
+        return 120
+    if seen <= limit * 20:
+        return 50
+    if seen <= limit * 50:
+        return 30
+    return 20
+
+
+def _max_offset_per_cat(seen: int, limit: int) -> int:
+    """Не копать одну категорию на десятки тысяч offset при огромной памяти."""
+    if seen <= limit * 5:
+        return 100_000
+    if seen <= limit * 20:
+        return 3000
+    if seen <= limit * 50:
+        return 1500
+    return 900
+
+
 class _ProxySessions:
     """Одна aiohttp-сессия на прокси; ротация при 403, в конце — direct."""
 
@@ -182,6 +204,22 @@ async def parse_l1_categories(
     fresh_rescans = 0
     sweeps_max = _fresh_sweeps_max()
     rounds_max = _category_rounds_max()
+    zero_cap = _max_zero_add_pages(skip_at_start, limit)
+    offset_cap = _max_offset_per_cat(skip_at_start, limit)
+    logger.info(
+        "2dehands paging round-robin zero_cap=%s offset_cap=%s",
+        zero_cap,
+        offset_cap,
+    )
+
+    def _reset_cat_paging() -> tuple[dict[int, int], dict[int, int], dict[int, bool], dict[int, bool]]:
+        return (
+            {c: 0 for c in category_ids},
+            {c: 0 for c in category_ids},
+            {c: False for c in category_ids},
+            {c: False for c in category_ids},
+        )
+
     try:
         for cat_round in range(rounds_max):
             if timed_out or len(items) >= limit:
@@ -193,63 +231,64 @@ async def parse_l1_categories(
                     rounds_max,
                     len(items),
                 )
+
+            offsets, zero_add, exhausted, retried_403 = _reset_cat_paging()
             for cat_index, cat_id in enumerate(category_ids):
+                sort_by, sort_order = _sort_for_run(parse_count, cat_index)
+                logger.info(
+                    "2dehands cat=%s sort=%s/%s seen_sellers=%s",
+                    cat_id,
+                    sort_by,
+                    sort_order,
+                    skip_at_start,
+                )
+
+            for fresh_sweep in range(sweeps_max):
                 if timed_out or len(items) >= limit:
                     break
-                if _past_deadline():
-                    timed_out = True
+                if fresh_sweep > 0:
+                    fresh_rescans += 1
+                    offsets, zero_add, exhausted, retried_403 = _reset_cat_paging()
                     logger.info(
-                        "2dehands deadline cat=%s items=%s, stop",
-                        cat_id,
+                        "2dehands rescan fresh sweep=%s/%s items=%s",
+                        fresh_sweep + 1,
+                        sweeps_max,
                         len(items),
                     )
-                    break
+                    await asyncio.sleep(1.0)
 
-                sort_by, sort_order = _sort_for_run(parse_count, cat_index)
-                base_params: dict[str, str | list[str]] = {
-                    "l1CategoryId": str(cat_id),
-                    "viewOptions": "list-view",
-                    "sortBy": sort_by,
-                    "sortOrder": sort_order,
-                    "attributesByKey[]": ["Language:all-languages"],
-                }
-
-                for fresh_sweep in range(sweeps_max):
-                    if timed_out or len(items) >= limit:
-                        break
-                    if fresh_sweep > 0:
-                        fresh_rescans += 1
+                while len(items) < limit and not timed_out:
+                    if _past_deadline():
+                        timed_out = True
                         logger.info(
-                            "2dehands cat=%s rescan fresh sweep=%s/%s items=%s",
-                            cat_id,
-                            fresh_sweep + 1,
-                            sweeps_max,
+                            "2dehands deadline items=%s, stop",
                             len(items),
                         )
-                        await asyncio.sleep(1.0)
+                        break
 
-                    offset = 0
-                    stale_pages = 0
-                    retried_after_403 = False
-                    sweep_exhausted = False
-                    if fresh_sweep == 0:
-                        logger.info(
-                            "2dehands cat=%s sort=%s/%s seen_sellers=%s",
-                            cat_id,
-                            sort_by,
-                            sort_order,
-                            skip_at_start,
-                        )
+                    active = [c for c in category_ids if not exhausted[c]]
+                    if not active:
+                        break
 
-                    while len(items) < limit:
+                    fetched_any = False
+                    for cat_index, cat_id in enumerate(category_ids):
+                        if timed_out or len(items) >= limit:
+                            break
+                        if exhausted[cat_id]:
+                            continue
                         if _past_deadline():
                             timed_out = True
-                            logger.info(
-                                "2dehands deadline mid-cat=%s items=%s, stop",
-                                cat_id,
-                                len(items),
-                            )
                             break
+
+                        sort_by, sort_order = _sort_for_run(parse_count, cat_index)
+                        base_params: dict[str, str | list[str]] = {
+                            "l1CategoryId": str(cat_id),
+                            "viewOptions": "list-view",
+                            "sortBy": sort_by,
+                            "sortOrder": sort_order,
+                            "attributesByKey[]": ["Language:all-languages"],
+                        }
+                        offset = offsets[cat_id]
                         items_before_page = len(items)
                         page_limit = page_request_limit(limit - len(items))
                         await _throttle()
@@ -269,53 +308,55 @@ async def parse_l1_categories(
                             err = str(exc)
                             if "403" in err:
                                 had_403 = True
-                                if offset > 0 and not retried_after_403:
+                                if offset > 0 and not retried_403[cat_id]:
                                     logger.info(
                                         "2dehands 403 cat=%s offset=%s, retry from 0",
                                         cat_id,
                                         offset,
                                     )
-                                    offset = 0
-                                    retried_after_403 = True
-                                    stale_pages = 0
+                                    offsets[cat_id] = 0
+                                    retried_403[cat_id] = True
+                                    zero_add[cat_id] = 0
                                     await asyncio.sleep(2.0)
+                                    fetched_any = True
                                     continue
                                 logger.warning(
-                                    "2dehands 403 cat=%s offset=%s items=%s, next category",
+                                    "2dehands 403 cat=%s offset=%s items=%s, skip cat",
                                     cat_id,
                                     offset,
                                     len(items),
                                 )
-                                break
+                                exhausted[cat_id] = True
+                                fetched_any = True
+                                continue
                             if "400" in err:
                                 had_400 = True
                                 logger.warning(
-                                    "2dehands 400 cat=%s offset=%s limit=%s items=%s, next category",
+                                    "2dehands 400 cat=%s offset=%s limit=%s items=%s, skip cat",
                                     cat_id,
                                     offset,
                                     page_limit,
                                     len(items),
                                 )
-                                break
+                                exhausted[cat_id] = True
+                                fetched_any = True
+                                continue
                             raise
 
                         listings = data.get("listings") or []
                         pages_fetched += 1
+                        fetched_any = True
                         await _report()
                         if not listings:
-                            if offset == 0:
-                                sweep_exhausted = True
-                            break
+                            exhausted[cat_id] = True
+                            continue
 
                         listings_scanned += len(listings)
-                        page_non_auction = 0
-                        page_seller_skips = 0
                         for listing in listings:
                             if skip_auction_listings and listing_is_auction(listing):
                                 skipped_auctions += 1
                                 continue
 
-                            page_non_auction += 1
                             item_id = listing.get("itemId")
                             if item_id and item_id in seen_items:
                                 continue
@@ -324,7 +365,6 @@ async def parse_l1_categories(
                             seller_id = seller.get("sellerId")
                             if seller_id and int(seller_id) in skip:
                                 skipped_sellers += 1
-                                page_seller_skips += 1
                                 continue
 
                             if item_id:
@@ -349,45 +389,41 @@ async def parse_l1_categories(
 
                         added = len(items) - items_before_page
                         if added > 0:
-                            stale_pages = 0
-                        elif page_non_auction == 0:
-                            pass
-                        elif page_seller_skips > 0:
-                            pass
+                            zero_add[cat_id] = 0
                         else:
-                            stale_pages += 1
-                        stale_limit = 60 if skip_at_start > limit * 3 else 20
-                        if stale_pages >= stale_limit:
-                            logger.info(
-                                "2dehands cat=%s stale %s pages offset=%s, end sweep",
-                                cat_id,
-                                stale_pages,
-                                offset,
-                            )
-                            sweep_exhausted = True
-                            break
+                            zero_add[cat_id] += 1
 
                         total = int(data.get("totalResultCount") or 0)
-                        offset += page_limit
-                        if offset >= total:
-                            sweep_exhausted = True
+                        next_offset = offset + page_limit
+                        if zero_add[cat_id] >= zero_cap:
+                            logger.info(
+                                "2dehands cat=%s dry pages=%s offset=%s, pause cat",
+                                cat_id,
+                                zero_add[cat_id],
+                                offset,
+                            )
+                            exhausted[cat_id] = True
+                        elif next_offset >= total:
                             logger.info(
                                 "2dehands cat=%s end of catalog offset=%s total=%s",
                                 cat_id,
-                                offset,
+                                next_offset,
                                 total,
                             )
-                            break
+                            exhausted[cat_id] = True
+                        elif next_offset >= offset_cap:
+                            logger.info(
+                                "2dehands cat=%s offset cap=%s seen=%s",
+                                cat_id,
+                                offset_cap,
+                                skip_at_start,
+                            )
+                            exhausted[cat_id] = True
+                        else:
+                            offsets[cat_id] = next_offset
 
-                    if len(items) >= limit:
+                    if not fetched_any:
                         break
-                    if not sweep_exhausted:
-                        break
-                    if fresh_sweep + 1 >= sweeps_max:
-                        break
-
-                if timed_out or len(items) >= limit:
-                    break
     finally:
         await pool.close()
 
@@ -429,9 +465,10 @@ async def parse_l1_categories(
     elif len(items) < limit and skip_at_start > limit * 5 and items:
         stats["note"] = (
             f"Собрано **{len(items)}** из **{limit}**. "
-            f"Память **{skip_at_start}** продавцов — листали с начала (DATE), новых мало. "
-            "**Фильтры → Сбросить память** если нужен полный лимит снова."
+            f"Память **{skip_at_start}** продавцов — почти все свежие уже были. "
+            "**Фильтры → Сбросить память** и **Прокси → off** (если 403)."
         )
+        stats["memory_exhausted"] = skip_at_start > limit * 30
     elif len(items) < limit and not items:
         stats["note"] = (
             "Пусто — сбросьте память продавцов (Фильтры) или отключите фильтр Bieden."

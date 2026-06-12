@@ -28,14 +28,20 @@ def resolve_user_proxies(settings: dict[str, Any]) -> list[str | None]:
 
 
 async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
-    cached = await repo.get_cached_l1_id("2dehands", category_key)
-    if cached:
-        return cached
-
     default = repo.default_l1_id("2dehands", category_key)
+    cached = await repo.get_cached_l1_id("2dehands", category_key)
     if default:
+        if cached and cached != default:
+            logger.info(
+                "2dehands category %s: cache id %s -> %s",
+                category_key,
+                cached,
+                default,
+            )
         await repo.cache_category_l1_id("2dehands", category_key, default)
         return default
+    if cached:
+        return cached
 
     page_url = f"{BASE}/l/{category_key}/"
     async with search_session(proxy) as (session, request_kwargs):

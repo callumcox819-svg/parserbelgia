@@ -257,9 +257,14 @@ async def run_parser(callback: CallbackQuery) -> None:
         seen_n = len(await repo.get_seen_seller_ids(uid, platform))
         if seen_n > 0:
             seen_warn = (
-                f"\n👤 Память: **{seen_n}** продавцов — свежие → конец ленты → "
-                "снова с начала, если мало новых."
+                f"\n👤 Память: **{seen_n}** продавцов — свежие → все категории → "
+                "снова с начала."
             )
+            if seen_n > limit * 30:
+                seen_warn += (
+                    f"\n⚠️ Память **{seen_n}** — слишком большая, новых мало. "
+                    "**Фильтры → Сбросить память**."
+                )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"
     await status.edit_text(
