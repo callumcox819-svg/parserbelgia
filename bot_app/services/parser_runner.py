@@ -159,13 +159,13 @@ async def run_user_parse(
     user_id: int,
     *,
     on_progress: ProgressFn = None,
+    on_waiting: ProgressFn = None,
     deadline: float | None = None,
 ) -> dict[str, Any]:
     if _PARSE_LOCK.locked():
-        raise ValueError(
-            "Сейчас уже идёт другой парсинг. Подождите 1–2 мин и нажмите снова — "
-            "одновременные запуски бьют IP и дают CloudFront 403."
-        )
+        logger.info("parse user=%s waiting — another run in progress", user_id)
+        if on_waiting:
+            await on_waiting({"queued": True})
     async with _PARSE_LOCK:
         return await _run_user_parse_locked(
             user_id,

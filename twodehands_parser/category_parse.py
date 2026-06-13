@@ -57,19 +57,19 @@ def _sort_for_run(parse_count: int, cat_index: int) -> tuple[str, str]:
 
 
 def _fresh_sweeps_max() -> int:
-    raw = os.environ.get("PARSE_FRESH_SWEEPS", "3")
+    raw = os.environ.get("PARSE_FRESH_SWEEPS", "5")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 5
+
+
+def _category_rounds_max() -> int:
+    raw = os.environ.get("PARSE_CATEGORY_ROUNDS", "3")
     try:
         return max(1, int(raw))
     except ValueError:
         return 3
-
-
-def _category_rounds_max() -> int:
-    raw = os.environ.get("PARSE_CATEGORY_ROUNDS", "2")
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        return 2
 
 
 def _max_zero_add_pages(seen: int, limit: int) -> int:
@@ -77,21 +77,16 @@ def _max_zero_add_pages(seen: int, limit: int) -> int:
     if seen <= limit * 3:
         return 120
     if seen <= limit * 20:
-        return 50
+        return 80
     if seen <= limit * 50:
-        return 30
-    return 20
+        return 60
+    return 40
 
 
 def _max_offset_per_cat(seen: int, limit: int) -> int:
-    """Не копать одну категорию на десятки тысяч offset при огромной памяти."""
-    if seen <= limit * 5:
-        return 100_000
-    if seen <= limit * 20:
-        return 1200
-    if seen <= limit * 50:
-        return 600
-    return 450
+    """Round-robin уже не копает одну категорию — cap только от бесконечного API."""
+    del seen
+    return max(8000, limit * 40)
 
 
 class _ProxySessions:
@@ -472,19 +467,17 @@ async def parse_l1_categories(
                 "категорий — попробуйте снова; если повторяется, отключите категорию в настройках."
             )
     elif len(items) < limit and items:
-        mem_note = (
-            f"Собрано **{len(items)}** из **{limit}**."
-        )
-        if skip_at_start > limit * 5:
+        mem_note = f"Собрано **{len(items)}** из **{limit}**."
+        if skip_at_start > limit * 3:
             mem_note += (
-                f" Память **{skip_at_start}** продавцов — новых мало."
+                f" Память **{skip_at_start}** продавцов — на свежих страницах "
+                "почти все уже были. **Фильтры → Сбросить память** для полного лимита."
             )
-            stats["memory_exhausted"] = skip_at_start > limit * 30
+            stats["memory_exhausted"] = skip_at_start > limit * 10
+        if fresh_rescans:
+            mem_note += f" Проходов «с начала»: **{fresh_rescans + 1}**."
         if had_403:
-            mem_note += (
-                " Часть категорий оборвалась по **403** — не запускайте "
-                "два парсинга сразу, подождите 2–3 мин."
-            )
+            mem_note += " Часть категорий оборвалась по **403** — подождите 2–3 мин."
         stats["note"] = mem_note
         stats["partial"] = True
     elif len(items) < limit and not items:

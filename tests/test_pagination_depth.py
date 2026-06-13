@@ -22,7 +22,7 @@ class PaginationDepthTest(unittest.TestCase):
 
     def test_tighter_caps_with_huge_memory(self) -> None:
         self.assertGreater(_max_zero_add_pages(0, 500), _max_zero_add_pages(40000, 500))
-        self.assertGreater(_max_offset_per_cat(0, 500), _max_offset_per_cat(40000, 500))
+        self.assertGreaterEqual(_max_offset_per_cat(40000, 500), 8000)
 
 
 if __name__ == "__main__":

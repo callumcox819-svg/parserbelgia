@@ -287,11 +287,11 @@ async def clear_seen_sellers(user_id: int, platform: str) -> int:
 
 
 def seller_memory_cap() -> int:
-    raw = os.environ.get("SELLER_MEMORY_CAP", "12000")
+    raw = os.environ.get("SELLER_MEMORY_CAP", "6000")
     try:
         return max(1000, int(raw))
     except ValueError:
-        return 12000
+        return 6000
 
 
 async def trim_seen_sellers(user_id: int, platform: str, cap: int | None = None) -> int:
