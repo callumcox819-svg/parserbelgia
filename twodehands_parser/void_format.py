@@ -79,5 +79,6 @@ def listing_to_void_item(listing: dict[str, Any]) -> dict[str, Any]:
         "location": location.get("cityName") or location.get("countryName") or "",
         "item_link": f"https://link.2dehands.be/{item_id}" if item_id else "",
         "person_link": person_link,
+        "seller_id": str(seller_id) if seller_id else "",
         "item_person_name": seller.get("sellerName") or "",
     }
