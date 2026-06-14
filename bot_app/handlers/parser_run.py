@@ -277,22 +277,10 @@ async def run_parser(callback: CallbackQuery) -> None:
     )
 
     deadline = time.monotonic() + PARSE_TIMEOUT_SEC
-
-    async def on_waiting(_stats: dict) -> None:
-        try:
-            await status.edit_text(
-                f"⏳ **Очередь** — сейчас парсит другой пользователь.\n"
-                f"Ваш запуск начнётся автоматически (лимит {limit}, до {timeout_min} мин).",
-                parse_mode="Markdown",
-            )
-        except Exception:
-            logger.debug("queue status edit skipped", exc_info=True)
-
     try:
         result = await run_user_parse(
             uid,
             on_progress=on_progress,
-            on_waiting=on_waiting,
             deadline=deadline,
         )
     except ValueError as exc:

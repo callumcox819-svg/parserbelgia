@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -20,8 +19,6 @@ from twodehands_parser.url_builder import BASE, extract_l1_category_id
 from ricardo_parser.category_parse import parse_ricardo_categories
 
 logger = logging.getLogger(__name__)
-
-_PARSE_LOCK = asyncio.Lock()
 
 
 def resolve_user_proxies(settings: dict[str, Any]) -> list[str | None]:
@@ -156,25 +153,6 @@ async def _run_ricardo(
 
 
 async def run_user_parse(
-    user_id: int,
-    *,
-    on_progress: ProgressFn = None,
-    on_waiting: ProgressFn = None,
-    deadline: float | None = None,
-) -> dict[str, Any]:
-    if _PARSE_LOCK.locked():
-        logger.info("parse user=%s waiting — another run in progress", user_id)
-        if on_waiting:
-            await on_waiting({"queued": True})
-    async with _PARSE_LOCK:
-        return await _run_user_parse_locked(
-            user_id,
-            on_progress=on_progress,
-            deadline=deadline,
-        )
-
-
-async def _run_user_parse_locked(
     user_id: int,
     *,
     on_progress: ProgressFn = None,
