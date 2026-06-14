@@ -73,6 +73,32 @@ def _seller_ids_from_items(items: list[dict[str, Any]]) -> set[int]:
     return sellers
 
 
+def _validation_name_stats(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Оценка: сколько имён софт с валидацией по имени обычно не берёт."""
+    single_word = 0
+    full_name = 0
+    empty = 0
+    unique_name_keys: set[str] = set()
+    for item in items:
+        raw = str(item.get("item_person_name") or "").strip()
+        if not raw:
+            empty += 1
+            continue
+        unique_name_keys.add(raw.lower())
+        parts = re.split(r"[\s\-']+", raw)
+        long_parts = [p for p in parts if len(re.sub(r"[^a-zA-Z]", "", p)) >= 3]
+        if len(long_parts) >= 2:
+            full_name += 1
+        else:
+            single_word += 1
+    return {
+        "unique_names": len(unique_name_keys),
+        "full_name_count": full_name,
+        "single_word_names": single_word,
+        "empty_names": empty,
+    }
+
+
 async def _run_2dehands(
     user_id: int,
     keys: list[str],

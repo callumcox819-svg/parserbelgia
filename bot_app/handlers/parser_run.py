@@ -106,6 +106,19 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
             )
         elif sellers_skip:
             extra += f"\n👤 Пропущено из памяти: **{sellers_skip}**."
+        full = int(stats.get("full_name_count") or 0)
+        single = int(stats.get("single_word_names") or 0)
+        uniq = int(stats.get("unique_names") or 0)
+        if count:
+            extra += (
+                f"\n📋 Имена: **{uniq}** уник., "
+                f"**{full}** с 2+ словами (обычно годятся для валидации), "
+                f"**{single}** однословных ников."
+            )
+            extra += (
+                "\n💡 ЧС в **софте** и память в **боте** (Фильтры) — "
+                "**разные**. Сбросить нужно оба."
+            )
     if platform == "ricardo" and stats:
         enriched = int(stats.get("enriched") or 0)
         proxies_n = int(stats.get("proxies") or 0)
