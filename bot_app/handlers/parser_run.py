@@ -97,6 +97,12 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
         trimmed = int(stats.get("sellers_trimmed") or 0)
         if trimmed:
             extra += f"\n✂️ Обрезано старых продавцов: **{trimmed}**."
+        repeats = int(stats.get("output_repeat_sellers") or 0)
+        if repeats:
+            extra += (
+                f"\n🚨 **Ошибка:** **{repeats}** продавцов в JSON уже были в памяти — "
+                "напишите админу."
+            )
         sellers_skip = int(stats.get("skipped_sellers") or 0)
         seen_db = int(stats.get("seen_sellers_before") or 0)
         if stats.get("remember_sellers") and seen_db:
@@ -271,14 +277,9 @@ async def run_parser(callback: CallbackQuery) -> None:
     seen_warn = ""
     if remember:
         seen_n = len(await repo.get_seen_seller_ids(uid, platform))
-        cap = repo.seller_memory_cap()
-        if seen_n > cap:
+        if seen_n > 0:
             seen_warn = (
-                f"\n✂️ Память **{seen_n}** → обрежу до **{cap}** перед поиском."
-            )
-        elif seen_n > 0:
-            seen_warn = (
-                f"\n👤 Память: **{seen_n}** продавцов (лимит **{cap}**)."
+                f"\n👤 Память: **{seen_n}** продавцов — в JSON только **новые**."
             )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"

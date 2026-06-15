@@ -286,18 +286,23 @@ async def clear_seen_sellers(user_id: int, platform: str) -> int:
     return n
 
 
-def seller_memory_cap() -> int:
-    raw = os.environ.get("SELLER_MEMORY_CAP", "6000")
+def seller_memory_cap() -> int | None:
+    """0 / off = без лимита (продавцы не забываются)."""
+    raw = os.environ.get("SELLER_MEMORY_CAP", "0").strip().lower()
+    if raw in ("0", "off", "none", ""):
+        return None
     try:
         return max(1000, int(raw))
     except ValueError:
-        return 6000
+        return None
 
 
 async def trim_seen_sellers(user_id: int, platform: str, cap: int | None = None) -> int:
-    """Оставить только последние cap продавцов (по rowid)."""
+    """Оставить только последние cap продавцов. По умолчанию не вызывается (cap=0)."""
     platform = normalize_platform(platform)
     limit = cap if cap is not None else seller_memory_cap()
+    if limit is None:
+        return 0
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             """
@@ -348,7 +353,6 @@ async def add_seen_sellers(
             [(user_id, platform, sid) for sid in seller_ids],
         )
         await db.commit()
-    await trim_seen_sellers(user_id, platform)
 
 
 async def add_seen_items(

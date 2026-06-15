@@ -195,18 +195,11 @@ async def run_user_parse(
     limit = int(settings["json_limit"])
     parse_count = int(settings.get("parse_count") or 0)
     seen_in_db = 0
-    sellers_trimmed = 0
     skip_sellers: set[int] = set()
+    skip_at_start: set[int] = set()
     if remember_sellers:
-        sellers_trimmed = await repo.trim_seen_sellers(user_id, platform)
-        if sellers_trimmed:
-            logger.info(
-                "parse user=%s trimmed %s old sellers (cap=%s)",
-                user_id,
-                sellers_trimmed,
-                repo.seller_memory_cap(),
-            )
         skip_sellers = await repo.get_seen_seller_ids(user_id, platform)
+        skip_at_start = set(skip_sellers)
         seen_in_db = len(skip_sellers)
 
     logger.info(
@@ -240,9 +233,17 @@ async def run_user_parse(
     stats["proxies_used"] = len(proxies)
     stats["seen_sellers_before"] = seen_in_db if remember_sellers else 0
     stats["remember_sellers"] = remember_sellers
+    stats.update(_validation_name_stats(result.get("items", [])))
     if remember_sellers:
-        stats["seller_memory_cap"] = repo.seller_memory_cap()
-        stats["sellers_trimmed"] = sellers_trimmed
+        out_sellers = _seller_ids_from_items(result.get("items", []))
+        repeats = out_sellers & skip_at_start
+        stats["output_repeat_sellers"] = len(repeats)
+        if repeats:
+            logger.error(
+                "parse user=%s BUG: %s sellers in JSON were already in memory",
+                user_id,
+                len(repeats),
+            )
 
     if remember_sellers:
         new_sellers = _seller_ids_from_items(result.get("items", []))
