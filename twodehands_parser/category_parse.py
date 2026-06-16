@@ -23,21 +23,36 @@ from .pagination import PAGE_SIZE, page_request_limit
 logger = logging.getLogger(__name__)
 
 
-def _request_delay_sec(seen_sellers: int = 0, limit: int = 500, items: int = 0) -> float:
+def _request_delay_sec(
+    seen_sellers: int = 0,
+    limit: int = 500,
+    items: int = 0,
+    *,
+    fast_skip: bool = False,
+) -> float:
+    if fast_skip and seen_sellers > limit * 3:
+        return 0.12
     raw = os.environ.get("PARSE_REQUEST_DELAY", "0.8")
     try:
         base = max(0.0, float(raw))
     except ValueError:
         base = 0.8
     if seen_sellers > limit * 5 and items < limit // 2:
-        return min(base, 0.45)
+        return min(base, 0.35)
     return base
 
 
-async def _throttle(seen_sellers: int = 0, limit: int = 500, items: int = 0) -> None:
-    delay = _request_delay_sec(seen_sellers, limit, items)
+async def _throttle(
+    seen_sellers: int = 0,
+    limit: int = 500,
+    items: int = 0,
+    *,
+    fast_skip: bool = False,
+) -> None:
+    delay = _request_delay_sec(seen_sellers, limit, items, fast_skip=fast_skip)
     if delay > 0:
-        await asyncio.sleep(delay + random.uniform(0, 0.2))
+        jitter = 0.05 if fast_skip else 0.15
+        await asyncio.sleep(delay + random.uniform(0, jitter))
 
 
 def _http_error(status: int, raw: str, proxy: str | None) -> RuntimeError:
@@ -86,12 +101,14 @@ def _pages_per_turn(seen: int, limit: int) -> int:
     if seen <= limit * 2:
         return 1
     if seen <= limit * 20:
-        return 3
-    return 5
+        return 4
+    if seen <= limit * 26:
+        return 8
+    return 12
 
 
 def _live_refresh_sec() -> float:
-    raw = os.environ.get("PARSE_LIVE_REFRESH_SEC", "90")
+    raw = os.environ.get("PARSE_LIVE_REFRESH_SEC", "60")
     try:
         return max(30.0, float(raw))
     except ValueError:
@@ -228,6 +245,7 @@ async def parse_l1_categories(
     last_live_refresh = time.monotonic()
     catalog_complete: dict[int, bool] = {c: False for c in category_ids}
     live_refreshes = 0
+    last_page_dry = False
     logger.info(
         "2dehands paging round-robin zero_cap=%s offset_cap=%s pages_per_turn=%s live_refresh=%ss",
         zero_cap,
@@ -354,7 +372,17 @@ async def parse_l1_categories(
                             offset = offsets[cat_id]
                             items_before_page = len(items)
                             page_limit = page_request_limit(limit - len(items))
-                            await _throttle(skip_at_start, limit, len(items))
+                            fast_skip = (
+                                last_page_dry
+                                and skip_at_start > limit * 3
+                                and len(items) < limit
+                            )
+                            await _throttle(
+                                skip_at_start,
+                                limit,
+                                len(items),
+                                fast_skip=fast_skip,
+                            )
                             api_url = api_url_from_params(
                                 base_params, limit=page_limit, offset=offset
                             )
@@ -453,6 +481,7 @@ async def parse_l1_categories(
                                 break
 
                             added = len(items) - items_before_page
+                            last_page_dry = added == 0 and bool(listings)
                             if added > 0:
                                 zero_add[cat_id] = 0
                             else:

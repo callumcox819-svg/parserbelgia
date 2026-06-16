@@ -21,7 +21,7 @@ from bot_app.storage import repo
 router = Router(name="parser")
 logger = logging.getLogger(__name__)
 
-PARSE_TIMEOUT_SEC = float(os.environ.get("PARSE_TIMEOUT_SEC", "900"))
+PARSE_TIMEOUT_SEC = float(os.environ.get("PARSE_TIMEOUT_SEC", "1200"))
 
 
 def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
@@ -280,6 +280,11 @@ async def run_parser(callback: CallbackQuery) -> None:
         if seen_n > 0:
             seen_warn = (
                 f"\n👤 Память: **{seen_n}** продавцов — в JSON только **новые**."
+            )
+        if seen_n > limit * 20:
+            seen_warn += (
+                f"\n⚠️ При **{seen_n}** в памяти за прогон часто **100–300**, "
+                "не 500. **Сбросить память** — для полного лимита."
             )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)
     start_hint = "без прокси" if using_direct else f"{len(proxies)} прокси"
