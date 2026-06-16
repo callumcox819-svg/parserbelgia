@@ -5,6 +5,7 @@ from twodehands_parser.category_parse import (
     _fresh_sweeps_max,
     _max_offset_per_cat,
     _max_zero_add_pages,
+    _pages_per_turn,
     _sort_for_run,
 )
 
@@ -21,8 +22,9 @@ class PaginationDepthTest(unittest.TestCase):
         self.assertGreaterEqual(_category_rounds_max(), 1)
 
     def test_tighter_caps_with_huge_memory(self) -> None:
-        self.assertGreater(_max_zero_add_pages(0, 500), _max_zero_add_pages(40000, 500))
-        self.assertGreaterEqual(_max_offset_per_cat(40000, 500), 8000)
+        self.assertEqual(_max_zero_add_pages(0, 500), 120)
+        self.assertGreaterEqual(_max_zero_add_pages(40000, 500), 100_000)
+        self.assertGreater(_pages_per_turn(40000, 500), 1)
 
 
 if __name__ == "__main__":
