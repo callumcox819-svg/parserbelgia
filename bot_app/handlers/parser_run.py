@@ -249,6 +249,8 @@ async def _deliver_parse_result(
     extra = _build_extra(platform, stats, count, limit)
     if stats.get("timed_out"):
         title = "⏱ Частично (лимит времени)"
+    elif stats.get("stagnated"):
+        title = "📋 Частично (новых нет)"
     elif stats.get("partial"):
         title = "⚠️ Частично"
     elif count < limit:
@@ -332,10 +334,16 @@ async def run_parser(callback: CallbackQuery) -> None:
             return
         last_progress_edit = now
         try:
+            skipped = stats.get("skipped_sellers") or 0
+            skip_line = (
+                f"\nПропущено (память): **{skipped}**"
+                if skipped
+                else ""
+            )
             await status.edit_text(
                 f"⏳ Парсинг {plat_label}…\n"
                 f"Страниц API: **{stats.get('pages_fetched', 0)}**, "
-                f"найдено: **{stats.get('items', 0)}**",
+                f"найдено: **{stats.get('items', 0)}**{skip_line}",
                 parse_mode="Markdown",
             )
         except Exception:

@@ -91,10 +91,22 @@ def _category_rounds_max() -> int:
 
 
 def _max_zero_add_pages(seen: int, limit: int) -> int:
-    """При большой памяти не останавливать категорию — все страницы «сухие», но глубже есть новые."""
+    """Сухие страницы подряд — пауза категории. При огромной памяти не крутить бесконечно."""
     if seen <= limit * 3:
         return 120
-    return 999_999
+    if seen <= limit * 15:
+        return 60
+    if seen <= limit * 25:
+        return 40
+    return 25
+
+
+def _stagnation_sec() -> float:
+    raw = os.environ.get("PARSE_STAGNATION_SEC", "150")
+    try:
+        return max(60.0, float(raw))
+    except ValueError:
+        return 150.0
 
 
 def _pages_per_turn(seen: int, limit: int) -> int:
@@ -116,9 +128,12 @@ def _live_refresh_sec() -> float:
 
 
 def _max_offset_per_cat(seen: int, limit: int) -> int:
-    """Round-robin уже не копает одну категорию — cap только от бесконечного API."""
-    del seen
-    return max(8000, limit * 40)
+    """Round-robin: при огромной памяти не уходить на offset 20k в одной категории."""
+    if seen <= limit * 20:
+        return max(8000, limit * 40)
+    if seen <= limit * 28:
+        return max(4000, limit * 20)
+    return max(2000, limit * 8)
 
 
 class _ProxySessions:
@@ -209,6 +224,7 @@ async def parse_l1_categories(
     had_403 = False
     had_400 = False
     timed_out = False
+    stagnated = False
 
     def _past_deadline() -> bool:
         return deadline is not None and time.monotonic() >= deadline
@@ -246,12 +262,30 @@ async def parse_l1_categories(
     catalog_complete: dict[int, bool] = {c: False for c in category_ids}
     live_refreshes = 0
     last_page_dry = False
+    stagnation_sec = _stagnation_sec()
+    last_item_growth_at = time.monotonic()
+    last_item_count = 0
+    items_at_last_live_refresh = -1
+    stale_live_skips = 0
+
+    def _note_item_growth() -> None:
+        nonlocal last_item_growth_at, last_item_count
+        if len(items) > last_item_count:
+            last_item_count = len(items)
+            last_item_growth_at = time.monotonic()
+
+    def _stagnation_hit() -> bool:
+        if len(items) == 0 or skip_at_start < limit * 8:
+            return False
+        return (time.monotonic() - last_item_growth_at) >= stagnation_sec
+
     logger.info(
-        "2dehands paging round-robin zero_cap=%s offset_cap=%s pages_per_turn=%s live_refresh=%ss",
+        "2dehands paging round-robin zero_cap=%s offset_cap=%s pages_per_turn=%s live_refresh=%ss stagnation=%ss",
         zero_cap,
         offset_cap,
         pages_per_turn,
         int(live_refresh_sec),
+        int(stagnation_sec),
     )
 
     def _reset_cat_paging() -> tuple[
@@ -287,9 +321,35 @@ async def parse_l1_categories(
             len(items),
         )
 
+    def _maybe_live_refresh() -> None:
+        nonlocal last_live_refresh, stale_live_skips, items_at_last_live_refresh, stagnated
+        if live_refresh_sec <= 0:
+            return
+        if time.monotonic() - last_live_refresh < live_refresh_sec:
+            return
+        if live_refreshes > 0 and len(items) <= items_at_last_live_refresh:
+            stale_live_skips += 1
+            last_live_refresh = time.monotonic()
+            logger.info(
+                "2dehands live refresh skipped #%s items=%s (нет прироста)",
+                stale_live_skips,
+                len(items),
+            )
+            if stale_live_skips >= 3 and len(items) > 0:
+                stagnated = True
+                logger.info(
+                    "2dehands stagnation after %s stale refreshes items=%s",
+                    stale_live_skips,
+                    len(items),
+                )
+            return
+        stale_live_skips = 0
+        items_at_last_live_refresh = len(items)
+        _live_refresh_offsets()
+
     try:
         for cat_round in range(rounds_max):
-            if timed_out or len(items) >= limit:
+            if timed_out or stagnated or len(items) >= limit:
                 break
             if cat_round > 0:
                 logger.info(
@@ -311,7 +371,7 @@ async def parse_l1_categories(
                 )
 
             for fresh_sweep in range(sweeps_max):
-                if timed_out or len(items) >= limit:
+                if timed_out or stagnated or len(items) >= limit:
                     break
                 if fresh_sweep > 0:
                     fresh_rescans += 1
@@ -324,7 +384,7 @@ async def parse_l1_categories(
                     )
                     await asyncio.sleep(1.0)
 
-                while len(items) < limit and not timed_out:
+                while len(items) < limit and not timed_out and not stagnated:
                     if _past_deadline():
                         timed_out = True
                         logger.info(
@@ -333,11 +393,21 @@ async def parse_l1_categories(
                         )
                         break
 
+                    if _stagnation_hit():
+                        stagnated = True
+                        logger.info(
+                            "2dehands stagnation %ss items=%s pages=%s, stop",
+                            int(stagnation_sec),
+                            len(items),
+                            pages_fetched,
+                        )
+                        break
+
                     if (
                         live_refresh_sec > 0
                         and time.monotonic() - last_live_refresh >= live_refresh_sec
                     ):
-                        _live_refresh_offsets()
+                        _maybe_live_refresh()
 
                     active = [c for c in category_ids if not exhausted[c]]
                     if not active:
@@ -345,12 +415,15 @@ async def parse_l1_categories(
 
                     fetched_any = False
                     for cat_index, cat_id in enumerate(category_ids):
-                        if timed_out or len(items) >= limit:
+                        if timed_out or stagnated or len(items) >= limit:
                             break
                         if exhausted[cat_id]:
                             continue
                         if _past_deadline():
                             timed_out = True
+                            break
+                        if _stagnation_hit():
+                            stagnated = True
                             break
 
                         sort_by, sort_order = _sort_for_run(parse_count, cat_index)
@@ -476,6 +549,7 @@ async def parse_l1_categories(
                                 items.append(void_item)
                                 if seller_id:
                                     skip.add(int(seller_id))
+                                _note_item_growth()
 
                                 if len(items) >= limit:
                                     break
@@ -528,6 +602,8 @@ async def parse_l1_categories(
 
     if timed_out and len(items) < limit:
         partial_reason = "timeout"
+    elif stagnated and len(items) < limit:
+        partial_reason = "stagnation"
     elif had_400 and len(items) < limit:
         partial_reason = "400"
     elif had_403 and len(items) < limit and (not items or pages_fetched < 12):
@@ -545,7 +621,7 @@ async def parse_l1_categories(
         stats["had_403"] = True
     if len(items) < limit and items:
         stats["shortfall"] = True
-    if partial_reason in ("403", "400", "timeout") and items:
+    if partial_reason in ("403", "400", "timeout", "stagnation") and items:
         stats["partial"] = True
         stats["partial_reason"] = partial_reason
         if partial_reason == "timeout":
@@ -553,6 +629,13 @@ async def parse_l1_categories(
             stats["note"] = (
                 f"Собрано **{len(items)}** из **{limit}** — **лимит времени**. "
                 "Отдан частичный JSON."
+            )
+        elif partial_reason == "stagnation":
+            stats["stagnated"] = True
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}** — **новых продавцов больше нет** "
+                f"(память **{skip_at_start}**). Отдан частичный JSON. "
+                "**Фильтры → Сбросить память** — для полного лимита."
             )
         elif partial_reason == "403":
             stats["note"] = (
