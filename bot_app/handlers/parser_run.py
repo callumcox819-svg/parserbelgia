@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from bot_app.keyboards import CB_MAIN_PARSE
@@ -21,7 +22,7 @@ from bot_app.storage import repo
 router = Router(name="parser")
 logger = logging.getLogger(__name__)
 
-PARSE_TIMEOUT_SEC = float(os.environ.get("PARSE_TIMEOUT_SEC", "1200"))
+PARSE_TIMEOUT_SEC = float(os.environ.get("PARSE_TIMEOUT_SEC", "1800"))
 
 
 def _empty_result_text(platform: str, stats: dict, seen_before: int) -> str:
@@ -161,6 +162,56 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
     return extra
 
 
+async def _safe_edit_status(status: Message, text: str) -> None:
+    """Статус после JSON: не роняем доставку файла из-за Markdown / flood."""
+    if len(text) > 4000:
+        text = text[:3990] + "…"
+    try:
+        await status.edit_text(text, parse_mode="Markdown")
+        return
+    except TelegramRetryAfter as exc:
+        await asyncio.sleep(float(exc.retry_after) + 0.5)
+        try:
+            await status.edit_text(text, parse_mode="Markdown")
+            return
+        except Exception:
+            logger.warning("status edit retry failed", exc_info=True)
+    except TelegramBadRequest:
+        plain = text.replace("**", "")
+        try:
+            await status.edit_text(plain[:4096])
+            return
+        except Exception:
+            logger.warning("status edit plain failed", exc_info=True)
+    except Exception:
+        logger.warning("status edit failed", exc_info=True)
+
+
+async def _send_parse_document(
+    callback: CallbackQuery,
+    tmp_path: Path,
+    *,
+    platform: str,
+    stamp: str,
+    count: int,
+) -> None:
+    doc = FSInputFile(tmp_path, filename=f"{platform}_{stamp}.json")
+    for attempt in range(3):
+        try:
+            await callback.message.answer_document(doc, caption=f"{count} items")
+            return
+        except TelegramRetryAfter as exc:
+            wait = float(exc.retry_after) + 0.5
+            logger.warning("document flood wait %.1fs attempt=%s", wait, attempt + 1)
+            await asyncio.sleep(wait)
+        except Exception:
+            if attempt >= 2:
+                raise
+            logger.warning("document send retry", exc_info=True)
+            await asyncio.sleep(2.0)
+    raise RuntimeError("Не удалось отправить JSON в Telegram после 3 попыток")
+
+
 async def _deliver_parse_result(
     callback: CallbackQuery,
     status: Message,
@@ -195,26 +246,44 @@ async def _deliver_parse_result(
         json.dump(result, tmp, ensure_ascii=False, indent=2)
         tmp_path = Path(tmp.name)
 
+    extra = _build_extra(platform, stats, count, limit)
+    if stats.get("timed_out"):
+        title = "⏱ Частично (лимит времени)"
+    elif stats.get("partial"):
+        title = "⚠️ Частично"
+    elif count < limit:
+        title = "✅ Готово (не полный лимит)"
+    else:
+        title = "✅ Готово"
+    summary = f"{title} ({plat_label}): **{count}** из **{limit}**.{extra}"
+
     try:
-        extra = _build_extra(platform, stats, count, limit)
-        if stats.get("timed_out"):
-            title = "⏱ Частично (лимит времени)"
-        elif stats.get("partial"):
-            title = "⚠️ Частично"
-        elif count < limit:
-            title = "✅ Готово (не полный лимит)"
-        else:
-            title = "✅ Готово"
-        await status.edit_text(
-            f"{title} ({plat_label}): **{count}** из **{limit}**.{extra}",
-            parse_mode="Markdown",
+        await _send_parse_document(
+            callback,
+            tmp_path,
+            platform=platform,
+            stamp=stamp,
+            count=count,
         )
-        await callback.message.answer_document(
-            FSInputFile(tmp_path, filename=f"{platform}_{stamp}.json"),
-            caption=f"{count} items",
+    except Exception:
+        logger.exception(
+            "JSON delivery failed user=%s platform=%s count=%s",
+            callback.from_user.id,
+            platform,
+            count,
         )
+        try:
+            await callback.message.answer(
+                f"⚠️ JSON (**{count}** шт.) не отправился — нажмите «Запустить парсер» "
+                "ещё раз или напишите админу."
+            )
+        except Exception:
+            pass
+        raise
     finally:
         tmp_path.unlink(missing_ok=True)
+
+    await _safe_edit_status(status, summary)
 
 
 @router.callback_query(F.data == CB_MAIN_PARSE)
@@ -283,7 +352,7 @@ async def run_parser(callback: CallbackQuery) -> None:
             )
         if seen_n > limit * 20:
             seen_warn += (
-                f"\n⚠️ При **{seen_n}** в памяти за прогон часто **100–300**, "
+                f"\n⚠️ При **{seen_n}** в памяти за прогон часто **100–350**, "
                 "не 500. **Сбросить память** — для полного лимита."
             )
     timeout_min = int(PARSE_TIMEOUT_SEC // 60)

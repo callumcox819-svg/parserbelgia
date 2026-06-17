@@ -31,14 +31,14 @@ def _request_delay_sec(
     fast_skip: bool = False,
 ) -> float:
     if fast_skip and seen_sellers > limit * 3:
-        return 0.12
+        return 0.06
     raw = os.environ.get("PARSE_REQUEST_DELAY", "0.8")
     try:
         base = max(0.0, float(raw))
     except ValueError:
         base = 0.8
     if seen_sellers > limit * 5 and items < limit // 2:
-        return min(base, 0.35)
+        return min(base, 0.25)
     return base
 
 
@@ -101,18 +101,18 @@ def _pages_per_turn(seen: int, limit: int) -> int:
     if seen <= limit * 2:
         return 1
     if seen <= limit * 20:
-        return 4
+        return 6
     if seen <= limit * 26:
-        return 8
-    return 12
+        return 12
+    return 18
 
 
 def _live_refresh_sec() -> float:
-    raw = os.environ.get("PARSE_LIVE_REFRESH_SEC", "60")
+    raw = os.environ.get("PARSE_LIVE_REFRESH_SEC", "45")
     try:
         return max(30.0, float(raw))
     except ValueError:
-        return 90.0
+        return 45.0
 
 
 def _max_offset_per_cat(seen: int, limit: int) -> int:
@@ -373,9 +373,12 @@ async def parse_l1_categories(
                             items_before_page = len(items)
                             page_limit = page_request_limit(limit - len(items))
                             fast_skip = (
-                                last_page_dry
-                                and skip_at_start > limit * 3
+                                skip_at_start > limit * 3
                                 and len(items) < limit
+                                and (
+                                    last_page_dry
+                                    or skip_at_start > limit * 25
+                                )
                             )
                             await _throttle(
                                 skip_at_start,
