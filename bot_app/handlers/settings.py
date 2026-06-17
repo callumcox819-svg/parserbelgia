@@ -206,8 +206,8 @@ async def open_filters(callback: CallbackQuery) -> None:
     if platform != "2dehands":
         text = (
             "Фильтры категорий — только для **2dehands**.\n\n"
-            "**Память продавцов** общая: если Ricardo «ничего не нашёл», "
-            "сбросьте память кнопкой ниже."
+            "**Память продавцов** — **личная у каждого пользователя** (не общая). "
+            "Если Ricardo «ничего не нашёл», сбросьте **свою** память кнопкой ниже."
         )
     await callback.message.edit_text(
         text,
@@ -245,7 +245,7 @@ async def clear_sellers_memory(callback: CallbackQuery) -> None:
     uid = callback.from_user.id
     platform = normalize_platform((await repo.get_user_settings(uid)).get("platform"))
     removed = await repo.clear_seen_sellers(uid, platform)
-    await callback.answer(f"Сброшено в памяти: {removed}")
+    await callback.answer(f"Сброшено в **вашем** личном ЧС: {removed}")
 
 
 @router.callback_query(F.data == CB_FILTER_SKIP_VEHICLES)

@@ -102,11 +102,11 @@ def _max_zero_add_pages(seen: int, limit: int) -> int:
 
 
 def _stagnation_sec() -> float:
-    raw = os.environ.get("PARSE_STAGNATION_SEC", "150")
+    raw = os.environ.get("PARSE_STAGNATION_SEC", "120")
     try:
-        return max(60.0, float(raw))
+        return max(45.0, float(raw))
     except ValueError:
-        return 150.0
+        return 120.0
 
 
 def _pages_per_turn(seen: int, limit: int) -> int:
@@ -203,6 +203,8 @@ async def parse_l1_categories(
     on_progress: ProgressFn = None,
     parse_count: int = 0,
     deadline: float | None = None,
+    soft_deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -225,9 +227,21 @@ async def parse_l1_categories(
     had_400 = False
     timed_out = False
     stagnated = False
+    cancelled = False
+    soft_stopped = False
 
     def _past_deadline() -> bool:
         return deadline is not None and time.monotonic() >= deadline
+
+    def _stop_requested() -> bool:
+        return should_stop is not None and should_stop()
+
+    def _past_soft_deadline() -> bool:
+        return (
+            soft_deadline is not None
+            and time.monotonic() >= soft_deadline
+            and len(items) > 0
+        )
 
     async def _report() -> None:
         if not on_progress:
@@ -278,6 +292,34 @@ async def parse_l1_categories(
         if len(items) == 0 or skip_at_start < limit * 8:
             return False
         return (time.monotonic() - last_item_growth_at) >= stagnation_sec
+
+    def _running() -> bool:
+        return not (timed_out or stagnated or cancelled or soft_stopped)
+
+    def _abort_now() -> bool:
+        nonlocal timed_out, stagnated, cancelled, soft_stopped
+        if _stop_requested():
+            cancelled = True
+            logger.info("2dehands cancelled items=%s pages=%s", len(items), pages_fetched)
+            return True
+        if _past_deadline():
+            timed_out = True
+            logger.info("2dehands deadline items=%s, stop", len(items))
+            return True
+        if _past_soft_deadline() and len(items) < limit:
+            soft_stopped = True
+            logger.info("2dehands soft deadline items=%s, stop", len(items))
+            return True
+        if _stagnation_hit():
+            stagnated = True
+            logger.info(
+                "2dehands stagnation %ss items=%s pages=%s, stop",
+                int(stagnation_sec),
+                len(items),
+                pages_fetched,
+            )
+            return True
+        return False
 
     logger.info(
         "2dehands paging round-robin zero_cap=%s offset_cap=%s pages_per_turn=%s live_refresh=%ss stagnation=%ss",
@@ -349,7 +391,7 @@ async def parse_l1_categories(
 
     try:
         for cat_round in range(rounds_max):
-            if timed_out or stagnated or len(items) >= limit:
+            if not _running() or len(items) >= limit:
                 break
             if cat_round > 0:
                 logger.info(
@@ -371,7 +413,7 @@ async def parse_l1_categories(
                 )
 
             for fresh_sweep in range(sweeps_max):
-                if timed_out or stagnated or len(items) >= limit:
+                if not _running() or len(items) >= limit:
                     break
                 if fresh_sweep > 0:
                     fresh_rescans += 1
@@ -384,23 +426,8 @@ async def parse_l1_categories(
                     )
                     await asyncio.sleep(1.0)
 
-                while len(items) < limit and not timed_out and not stagnated:
-                    if _past_deadline():
-                        timed_out = True
-                        logger.info(
-                            "2dehands deadline items=%s, stop",
-                            len(items),
-                        )
-                        break
-
-                    if _stagnation_hit():
-                        stagnated = True
-                        logger.info(
-                            "2dehands stagnation %ss items=%s pages=%s, stop",
-                            int(stagnation_sec),
-                            len(items),
-                            pages_fetched,
-                        )
+                while len(items) < limit and _running():
+                    if _abort_now():
                         break
 
                     if (
@@ -415,15 +442,11 @@ async def parse_l1_categories(
 
                     fetched_any = False
                     for cat_index, cat_id in enumerate(category_ids):
-                        if timed_out or stagnated or len(items) >= limit:
+                        if not _running() or len(items) >= limit:
                             break
                         if exhausted[cat_id]:
                             continue
-                        if _past_deadline():
-                            timed_out = True
-                            break
-                        if _stagnation_hit():
-                            stagnated = True
+                        if _abort_now():
                             break
 
                         sort_by, sort_order = _sort_for_run(parse_count, cat_index)
@@ -436,10 +459,9 @@ async def parse_l1_categories(
                         }
 
                         for _ in range(pages_per_turn):
-                            if timed_out or len(items) >= limit or exhausted[cat_id]:
+                            if not _running() or len(items) >= limit or exhausted[cat_id]:
                                 break
-                            if _past_deadline():
-                                timed_out = True
+                            if _abort_now():
                                 break
 
                             offset = offsets[cat_id]
@@ -600,7 +622,11 @@ async def parse_l1_categories(
     finally:
         await pool.close()
 
-    if timed_out and len(items) < limit:
+    if cancelled:
+        partial_reason = "cancelled"
+    elif soft_stopped and len(items) < limit:
+        partial_reason = "soft_timeout"
+    elif timed_out and len(items) < limit:
         partial_reason = "timeout"
     elif stagnated and len(items) < limit:
         partial_reason = "stagnation"
@@ -621,7 +647,7 @@ async def parse_l1_categories(
         stats["had_403"] = True
     if len(items) < limit and items:
         stats["shortfall"] = True
-    if partial_reason in ("403", "400", "timeout", "stagnation") and items:
+    if partial_reason in ("403", "400", "timeout", "stagnation", "cancelled", "soft_timeout") and items:
         stats["partial"] = True
         stats["partial_reason"] = partial_reason
         if partial_reason == "timeout":
@@ -629,6 +655,18 @@ async def parse_l1_categories(
             stats["note"] = (
                 f"Собрано **{len(items)}** из **{limit}** — **лимит времени**. "
                 "Отдан частичный JSON."
+            )
+        elif partial_reason == "cancelled":
+            stats["cancelled"] = True
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}** — **остановлено (СТОП)**. "
+                "Отдан частичный JSON."
+            )
+        elif partial_reason == "soft_timeout":
+            stats["soft_stopped"] = True
+            stats["note"] = (
+                f"Собрано **{len(items)}** из **{limit}** — **авто-стоп** "
+                "(долго без полного лимита). Отдан частичный JSON."
             )
         elif partial_reason == "stagnation":
             stats["stagnated"] = True

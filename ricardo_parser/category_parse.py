@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import Callable
 from typing import Any
 
 from .article_detail import article_page_url, parse_article_page_html
@@ -172,6 +173,7 @@ async def parse_ricardo_categories(
     proxies: list[str | None] | None = None,
     skip_seller_ids: set[int] | None = None,
     deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     if limit < 1:
         raise ValueError("limit должен быть >= 1")
@@ -190,9 +192,13 @@ async def parse_ricardo_categories(
     data_source = "unknown"
     referer = f"{BASE}/{LANG}/"
     timed_out = False
+    cancelled = False
 
     def _past_deadline() -> bool:
         return deadline is not None and time.monotonic() >= deadline
+
+    def _stop_requested() -> bool:
+        return should_stop is not None and should_stop()
 
     if not enrich:
         logger.info(
@@ -203,7 +209,10 @@ async def parse_ricardo_categories(
 
     async with proxy_pool(proxy_list) as pool:
         for slug in category_slugs:
-            if timed_out or len(raw_articles) >= limit:
+            if timed_out or cancelled or len(raw_articles) >= limit:
+                break
+            if _stop_requested():
+                cancelled = True
                 break
             if _past_deadline():
                 timed_out = True
@@ -213,6 +222,9 @@ async def parse_ricardo_categories(
             empty_streak = 0
             category_failed = False
             while len(raw_articles) < limit and page <= MAX_PAGES_PER_CATEGORY:
+                if _stop_requested():
+                    cancelled = True
+                    break
                 if _past_deadline():
                     timed_out = True
                     break

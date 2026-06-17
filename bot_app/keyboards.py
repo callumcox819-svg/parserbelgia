@@ -66,6 +66,7 @@ def filters_keyboard(
 CB_MAIN_PARSE = "main:parse"
 CB_MAIN_SETTINGS = "main:settings"
 CB_MAIN_ADMIN = "main:admin"
+CB_PARSE_STOP = "parse:stop"
 
 CB_SET_PLATFORM = "set:platform"
 CB_SET_CATEGORIES = "set:categories"
@@ -88,6 +89,14 @@ CB_ADMIN_GRANT = "admin:grant"
 CB_ADMIN_REVOKE = "admin:revoke"
 CB_ADMIN_STATS = "admin:stats"
 CB_ADMIN_BACK = "admin:back"
+
+
+def parsing_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏹ СТОП", callback_data=CB_PARSE_STOP)],
+        ]
+    )
 
 
 def main_menu_keyboard(*, is_admin: bool) -> InlineKeyboardMarkup:

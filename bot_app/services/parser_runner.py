@@ -111,6 +111,8 @@ async def _run_2dehands(
     on_progress: ProgressFn = None,
     parse_count: int = 0,
     deadline: float | None = None,
+    soft_deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     if skip_vehicle_categories:
         keys = [k for k in keys if k not in VEHICLE_CATEGORY_KEYS]
@@ -136,6 +138,8 @@ async def _run_2dehands(
             on_progress=on_progress,
             parse_count=parse_count,
             deadline=deadline,
+            soft_deadline=soft_deadline,
+            should_stop=should_stop,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc):
@@ -151,6 +155,8 @@ async def _run_ricardo(
     skip_sellers: set[int],
     *,
     deadline: float | None = None,
+    soft_deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     slugs: list[str] = []
     for key in keys:
@@ -168,6 +174,7 @@ async def _run_ricardo(
             proxies=proxies,
             skip_seller_ids=set(skip_sellers),
             deadline=deadline,
+            should_stop=should_stop,
         )
     except RuntimeError as exc:
         if "403" not in str(exc) and "Forbidden" not in str(exc) and "Cloudflare" not in str(
@@ -183,6 +190,9 @@ async def run_user_parse(
     *,
     on_progress: ProgressFn = None,
     deadline: float | None = None,
+    soft_deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    persist_sellers: bool = True,
 ) -> dict[str, Any]:
     settings = await repo.get_user_settings(user_id)
     platform = normalize_platform(settings.get("platform"))
@@ -213,7 +223,13 @@ async def run_user_parse(
     )
     if platform == PLATFORM_RICARDO:
         result = await _run_ricardo(
-            keys, limit, proxies, skip_sellers, deadline=deadline
+            keys,
+            limit,
+            proxies,
+            skip_sellers,
+            deadline=deadline,
+            soft_deadline=soft_deadline,
+            should_stop=should_stop,
         )
     else:
         result = await _run_2dehands(
@@ -227,6 +243,8 @@ async def run_user_parse(
             on_progress=on_progress,
             parse_count=parse_count,
             deadline=deadline,
+            soft_deadline=soft_deadline,
+            should_stop=should_stop,
         )
 
     stats = result.setdefault("stats", {})
@@ -245,8 +263,20 @@ async def run_user_parse(
                 len(repeats),
             )
 
-    if remember_sellers:
+    if remember_sellers and persist_sellers:
         new_sellers = _seller_ids_from_items(result.get("items", []))
         await repo.add_seen_sellers(user_id, platform, new_sellers)
     await repo.increment_parse_count(user_id)
     return result
+
+
+async def persist_parse_sellers(user_id: int, result: dict[str, Any]) -> int:
+    """Записать продавцов из JSON в личную память пользователя (после выдачи файла)."""
+    settings = await repo.get_user_settings(user_id)
+    platform = normalize_platform(settings.get("platform"))
+    if not bool(settings.get("filter_remember_sellers", True)):
+        return 0
+    new_sellers = _seller_ids_from_items(result.get("items", []))
+    if new_sellers:
+        await repo.add_seen_sellers(user_id, platform, new_sellers)
+    return len(new_sellers)
