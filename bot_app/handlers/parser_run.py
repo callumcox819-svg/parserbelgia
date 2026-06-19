@@ -425,7 +425,21 @@ async def run_parser(callback: CallbackQuery) -> None:
         return
     except Exception as exc:
         logger.exception("parse failed user=%s", uid)
-        await status.edit_text(f"❌ Ошибка: {exc}", reply_markup=None)
+        err = str(exc)
+        if any(x in err for x in ("HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")):
+            text = (
+                "⚠️ **2dehands API временно недоступен** (ошибка сервера).\n"
+                "Подождите 1–2 мин и запустите снова.\n"
+                "**Прокси → on** — если парсите без прокси с сервера."
+            )
+        elif "403" in err:
+            text = (
+                "🚫 **CloudFront 403** — IP заблокирован.\n"
+                "**Прокси → on** (BE/EU) или подождите 3–5 мин."
+            )
+        else:
+            text = f"❌ Ошибка: {exc}"
+        await status.edit_text(text, parse_mode="Markdown", reply_markup=None)
         return
     finally:
         end_parse(uid)

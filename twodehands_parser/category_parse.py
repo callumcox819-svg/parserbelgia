@@ -94,11 +94,15 @@ def _max_zero_add_pages(seen: int, limit: int) -> int:
     """Сухие страницы подряд — пауза категории. При огромной памяти не крутить бесконечно."""
     if seen <= limit * 3:
         return 120
-    if seen <= limit * 15:
-        return 60
+    if seen <= limit * 18:
+        return 80
     if seen <= limit * 25:
-        return 40
-    return 25
+        return 50
+    return 30
+
+
+def _is_transient_http(err: str) -> bool:
+    return any(f"HTTP {code}" in err for code in (500, 502, 503, 504))
 
 
 def _stagnation_sec() -> float:
@@ -112,11 +116,11 @@ def _stagnation_sec() -> float:
 def _pages_per_turn(seen: int, limit: int) -> int:
     if seen <= limit * 2:
         return 1
-    if seen <= limit * 20:
-        return 6
+    if seen <= limit * 18:
+        return 8
     if seen <= limit * 26:
         return 12
-    return 18
+    return 16
 
 
 def _live_refresh_sec() -> float:
@@ -225,6 +229,7 @@ async def parse_l1_categories(
     partial_reason: str | None = None
     had_403 = False
     had_400 = False
+    had_5xx = False
     timed_out = False
     stagnated = False
     cancelled = False
@@ -281,6 +286,8 @@ async def parse_l1_categories(
     last_item_count = 0
     items_at_last_live_refresh = -1
     stale_live_skips = 0
+    retried_5xx: set[tuple[int, int]] = set()
+    consecutive_5xx: dict[int, int] = {c: 0 for c in category_ids}
 
     def _note_item_growth() -> None:
         nonlocal last_item_growth_at, last_item_count
@@ -291,7 +298,10 @@ async def parse_l1_categories(
     def _stagnation_hit() -> bool:
         if len(items) == 0 or skip_at_start < limit * 8:
             return False
-        return (time.monotonic() - last_item_growth_at) >= stagnation_sec
+        idle_limit = stagnation_sec
+        if skip_at_start > limit * 8 and 0 < len(items) < limit // 3:
+            idle_limit = max(idle_limit, 180.0)
+        return (time.monotonic() - last_item_growth_at) >= idle_limit
 
     def _running() -> bool:
         return not (timed_out or stagnated or cancelled or soft_stopped)
@@ -531,10 +541,42 @@ async def parse_l1_categories(
                                     exhausted[cat_id] = True
                                     fetched_any = True
                                     break
+                                if _is_transient_http(err):
+                                    had_5xx = True
+                                    key = (cat_id, offset)
+                                    if key not in retried_5xx:
+                                        retried_5xx.add(key)
+                                        logger.info(
+                                            "2dehands 5xx cat=%s offset=%s items=%s, retry",
+                                            cat_id,
+                                            offset,
+                                            len(items),
+                                        )
+                                        await asyncio.sleep(2.0 + random.uniform(0, 1.5))
+                                        fetched_any = True
+                                        continue
+                                    consecutive_5xx[cat_id] = (
+                                        consecutive_5xx.get(cat_id, 0) + 1
+                                    )
+                                    logger.warning(
+                                        "2dehands 5xx cat=%s offset=%s items=%s, skip page (%s)",
+                                        cat_id,
+                                        offset,
+                                        len(items),
+                                        consecutive_5xx[cat_id],
+                                    )
+                                    offsets[cat_id] = offset + page_limit
+                                    zero_add[cat_id] += 1
+                                    fetched_any = True
+                                    if consecutive_5xx[cat_id] >= 4:
+                                        exhausted[cat_id] = True
+                                        break
+                                    continue
                                 raise
 
                             listings = data.get("listings") or []
                             pages_fetched += 1
+                            consecutive_5xx[cat_id] = 0
                             fetched_any = True
                             await _report()
                             if not listings:
@@ -645,6 +687,8 @@ async def parse_l1_categories(
     }
     if had_403:
         stats["had_403"] = True
+    if had_5xx:
+        stats["had_5xx"] = True
     if len(items) < limit and items:
         stats["shortfall"] = True
     if partial_reason in ("403", "400", "timeout", "stagnation", "cancelled", "soft_timeout") and items:
@@ -699,6 +743,8 @@ async def parse_l1_categories(
             )
         if had_403:
             mem_note += " Часть категорий оборвалась по **403** — подождите 2–3 мин."
+        if had_5xx:
+            mem_note += " API **500** на части страниц — пропущены, парсинг продолжен."
         stats["note"] = mem_note
         stats["partial"] = True
     elif len(items) < limit and not items:
