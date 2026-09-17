@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bot_app.categories import L1_CATEGORIES
-from bot_app.platforms import PLATFORM_2DEHANDS, PLATFORM_RICARDO
+from bot_app.laendle_categories import LAENDLE_CATEGORIES
+from bot_app.platforms import PLATFORM_2DEHANDS, PLATFORM_LAENDLE, PLATFORM_RICARDO
 from bot_app.ricardo_categories import RICARDO_CATEGORIES
 
 
@@ -14,6 +15,7 @@ class BotCategory:
     platform: str
     l1_id: int | None = None
     ricardo_slug: str | None = None
+    laendle_slug: str | None = None
 
 
 def categories_for_platform(platform: str) -> list[BotCategory]:
@@ -26,6 +28,16 @@ def categories_for_platform(platform: str) -> list[BotCategory]:
                 ricardo_slug=c.slug,
             )
             for c in RICARDO_CATEGORIES
+        ]
+    if platform == PLATFORM_LAENDLE:
+        return [
+            BotCategory(
+                key=c.key,
+                title=c.title,
+                platform=PLATFORM_LAENDLE,
+                laendle_slug=c.slug,
+            )
+            for c in LAENDLE_CATEGORIES
         ]
     return [
         BotCategory(

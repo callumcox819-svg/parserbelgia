@@ -8,8 +8,9 @@ from typing import Any
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 from bot_app.categories import CATEGORY_BY_KEY
-from bot_app.platforms import PLATFORM_RICARDO, normalize_platform
+from bot_app.platforms import PLATFORM_LAENDLE, PLATFORM_RICARDO, normalize_platform
 from bot_app.ricardo_categories import RICARDO_CATEGORY_BY_KEY
+from bot_app.laendle_categories import LAENDLE_CATEGORY_BY_KEY
 from bot_app.storage import repo
 from settings import normalize_proxy, parse_proxy_list
 from twodehands_parser.category_parse import parse_l1_categories
@@ -17,6 +18,7 @@ from twodehands_parser.filters import VEHICLE_CATEGORY_KEYS
 from twodehands_parser.http_client import BROWSER_HEADERS, search_session
 from twodehands_parser.url_builder import BASE, extract_l1_category_id
 from ricardo_parser.category_parse import parse_ricardo_categories
+from laendle_parser.category_parse import parse_laendle_categories
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +68,12 @@ async def _resolve_l1_id(category_key: str, proxy: str | None) -> int:
 def _seller_ids_from_items(items: list[dict[str, Any]]) -> set[int]:
     sellers: set[int] = set()
     for item in items:
+        sid = item.get("seller_id")
+        if sid is not None and str(sid).strip().isdigit():
+            sellers.add(int(sid))
+            continue
         link = item.get("person_link") or ""
-        match = re.search(r"/(\d+)/?\s*$", str(link).rstrip("/"))
+        match = re.search(r"(?:/|-)(\d+)/?\s*$", str(link).rstrip("/"))
         if match:
             sellers.add(int(match.group(1)))
     return sellers
@@ -185,6 +191,36 @@ async def _run_ricardo(
         raise
 
 
+async def _run_laendle(
+    keys: list[str],
+    limit: int,
+    proxies: list[str | None],
+    skip_sellers: set[int],
+    *,
+    on_progress: ProgressFn = None,
+    deadline: float | None = None,
+    soft_deadline: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    slugs: list[str] = []
+    for key in keys:
+        cat = LAENDLE_CATEGORY_BY_KEY.get(key)
+        if cat:
+            slugs.append(cat.slug)
+    if not slugs:
+        raise ValueError("Нет категорий Ländleanzeiger для парсинга.")
+    return await parse_laendle_categories(
+        slugs,
+        limit=limit,
+        proxies=proxies,
+        skip_seller_ids=set(skip_sellers),
+        on_progress=on_progress,
+        deadline=deadline,
+        soft_deadline=soft_deadline,
+        should_stop=should_stop,
+    )
+
+
 async def run_user_parse(
     user_id: int,
     *,
@@ -227,6 +263,17 @@ async def run_user_parse(
             limit,
             proxies,
             skip_sellers,
+            deadline=deadline,
+            soft_deadline=soft_deadline,
+            should_stop=should_stop,
+        )
+    elif platform == PLATFORM_LAENDLE:
+        result = await _run_laendle(
+            keys,
+            limit,
+            proxies,
+            skip_sellers,
+            on_progress=on_progress,
             deadline=deadline,
             soft_deadline=soft_deadline,
             should_stop=should_stop,

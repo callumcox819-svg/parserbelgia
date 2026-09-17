@@ -8,7 +8,12 @@ from aiogram.types import (
 )
 
 from bot_app.category_registry import categories_for_platform
-from bot_app.platforms import PLATFORMS, PLATFORM_2DEHANDS, PLATFORM_RICARDO
+from bot_app.platforms import (
+    PLATFORMS,
+    PLATFORM_2DEHANDS,
+    PLATFORM_LAENDLE,
+    PLATFORM_RICARDO,
+)
 
 
 def filters_keyboard(
@@ -134,7 +139,7 @@ def settings_menu_keyboard() -> InlineKeyboardMarkup:
 
 def platform_keyboard(current: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for key in (PLATFORM_2DEHANDS, PLATFORM_RICARDO):
+    for key in (PLATFORM_2DEHANDS, PLATFORM_RICARDO, PLATFORM_LAENDLE):
         meta = PLATFORMS[key]
         mark = "✅ " if key == current else ""
         rows.append(

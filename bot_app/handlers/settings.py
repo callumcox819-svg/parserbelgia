@@ -49,7 +49,11 @@ async def _settings_summary(user_id: int) -> str:
     delay_hint = (
         "~0.8 с между запросами"
         if platform == "2dehands"
-        else "~1.5 с категории (как void), карточки — опционально"
+        else (
+            "~0.35 с (категории + карточки)"
+            if platform == "laendle"
+            else "~1.5 с категории (как void), карточки — опционально"
+        )
     )
     filters_line = ""
     if platform == "2dehands":
@@ -99,8 +103,9 @@ async def open_platform(callback: CallbackQuery) -> None:
     platform = normalize_platform(s.get("platform"))
     await callback.message.edit_text(
         "🏪 **Площадка**\n\n"
-        "2dehands — Бельгия (BE/EU прокси).\n"
-        "Ricardo — Швейцария (**CH** residential прокси).",
+        "🇧🇪 **2dehands** — Бельгия (BE/EU прокси).\n"
+        "🇨🇭 **Ricardo** — Швейцария (**CH** residential).\n"
+        "🇦🇹 **Ländleanzeiger** — Австрия (AT/DE/EU, можно без прокси).",
         reply_markup=platform_keyboard(platform),
         parse_mode="Markdown",
     )
@@ -205,9 +210,9 @@ async def open_filters(callback: CallbackQuery) -> None:
     )
     if platform != "2dehands":
         text = (
-            "Фильтры категорий — только для **2dehands**.\n\n"
-            "**Память продавцов** — **личная у каждого пользователя** (не общая). "
-            "Если Ricardo «ничего не нашёл», сбросьте **свою** память кнопкой ниже."
+            f"Фильтры категорий — только для **2dehands**.\n\n"
+            f"**Память продавцов** — **личная у каждого пользователя** "
+            f"(площадка: **{platform}**). Сбросьте **свою** память кнопкой ниже."
         )
     await callback.message.edit_text(
         text,

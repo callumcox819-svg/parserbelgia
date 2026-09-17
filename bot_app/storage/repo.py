@@ -26,7 +26,7 @@ async def ensure_user(user_id: int, username: str | None) -> None:
             """,
             (user_id, username),
         )
-        for platform in ("2dehands", "ricardo"):
+        for platform in ("2dehands", "ricardo", "laendle"):
             for cat in categories_for_platform(platform):
                 await db.execute(
                     """

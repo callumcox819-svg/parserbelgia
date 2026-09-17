@@ -14,7 +14,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from bot_app.keyboards import CB_MAIN_PARSE, CB_PARSE_STOP, parsing_keyboard
-from bot_app.platforms import normalize_platform
+from bot_app.platforms import PLATFORMS, normalize_platform
 from bot_app.services.parse_control import begin as begin_parse, end as end_parse, request_cancel
 from bot_app.services.parser_runner import (
     persist_parse_sellers,
@@ -132,6 +132,33 @@ def _build_extra(platform: str, stats: dict, count: int, limit: int) -> str:
             extra += (
                 "\n💡 ЧС в **софте** и **личная память бота** (Фильтры) — "
                 "**разные**. У каждого пользователя своя память."
+            )
+    if platform == "laendle" and stats:
+        no_seller = int(stats.get("skipped_no_seller") or 0)
+        sellers_skip = int(stats.get("skipped_sellers") or 0)
+        seen_db = int(stats.get("seen_sellers_before") or 0)
+        note = stats.get("note")
+        if note and count < limit:
+            extra += f"\n\n⚠️ {note}"
+        if stats.get("remember_sellers") and seen_db:
+            extra += (
+                f"\n👤 **Ваш личный** ЧС: **{seen_db}** продавцов "
+                f"(пропущено в этом запуске: **{sellers_skip}**)."
+            )
+        elif sellers_skip:
+            extra += f"\n👤 Пропущено из памяти: **{sellers_skip}**."
+        if no_seller:
+            extra += f"\n⏭ Без данных продавца: **{no_seller}**."
+        full = int(stats.get("full_name_count") or 0)
+        single = int(stats.get("single_word_names") or 0)
+        uniq = int(stats.get("unique_names") or 0)
+        if count:
+            extra += (
+                f"\n📋 Имена: **{uniq}** уник., "
+                f"**{full}** с 2+ словами, **{single}** однословных."
+            )
+            extra += (
+                "\n💡 Телефон на сайте часто за логином — в JSON может быть пусто."
             )
     if platform == "ricardo" and stats:
         enriched = int(stats.get("enriched") or 0)
@@ -313,7 +340,7 @@ async def run_parser(callback: CallbackQuery) -> None:
     session = begin_parse(uid)
     settings = await repo.get_user_settings(uid)
     platform = normalize_platform(settings.get("platform"))
-    plat_label = "Ricardo" if platform == "ricardo" else "2dehands"
+    plat_label = PLATFORMS.get(platform, {}).get("title") or platform
     proxies = resolve_user_proxies(settings)
     using_direct = proxies == [None]
     logger.info(

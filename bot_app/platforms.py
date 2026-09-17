@@ -4,6 +4,7 @@ from __future__ import annotations
 
 PLATFORM_2DEHANDS = "2dehands"
 PLATFORM_RICARDO = "ricardo"
+PLATFORM_LAENDLE = "laendle"
 
 PLATFORMS: dict[str, dict[str, str]] = {
     PLATFORM_2DEHANDS: {
@@ -15,6 +16,11 @@ PLATFORMS: dict[str, dict[str, str]] = {
         "title": "Ricardo",
         "label": "🇨🇭 Ricardo",
         "proxy_hint": "CH (Швейцария)",
+    },
+    PLATFORM_LAENDLE: {
+        "title": "Ländleanzeiger",
+        "label": "🇦🇹 Австрия (Ländleanzeiger)",
+        "proxy_hint": "AT/DE/EU",
     },
 }
 
